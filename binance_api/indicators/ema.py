@@ -5,8 +5,11 @@ This module contains the EMA indicator logic.
 # 1st party imports
 from typing import List
 
+# 3rd party imports
+import numpy as np
+
 # local imports
-from binance_api.indicators.abstract import Indicator
+from binance_api.indicators.abstract import Indicator, AvailableIndicators
 
 
 class EMA(Indicator):
@@ -20,7 +23,7 @@ class EMA(Indicator):
         length (int): The period/lookback length for the EMA calculation.
     """
 
-    NAME = "EMA"
+    NAME = AvailableIndicators.EMA
 
     def __init__(self, length: int) -> None:
         """
@@ -31,9 +34,9 @@ class EMA(Indicator):
         """
         self.length = length
 
-    def get_value(self, candles_open: List[float]) -> List[float]:
+    def get_value(self, candles_open: List[float] | np.ndarray) -> np.ndarray:
         """
-        Calculate EMA values for a series of candle data.
+        Calculate EMA values for a series of candle data (vectorized).
 
         Uses the standard EMA formula: EMA = α * price + (1 - α) * previous_EMA
         where α (alpha) = 2 / (length + 1).
@@ -45,32 +48,29 @@ class EMA(Indicator):
             candles_open: List of candle open prices (oldest to newest).
 
         Returns:
-            List of EMA values corresponding to each candle position.
+            np.ndarray of EMA values corresponding to each candle position.
         """
 
-        # the ema value at each idx
-        ema_values = []
+        # convert to numpy array
+        prices = np.asarray(candles_open, dtype=np.float64)
+        n = len(prices)
+
+        # initialize output array with zeros
+        ema_values = np.zeros(n, dtype=np.float64)
+
+        # not enough data
+        if n < self.length:
+            return ema_values
 
         # smoothing factor
-        alpha = 2 / (self.length + 1)
+        alpha = 2.0 / (self.length + 1)
 
-        # iterate through all candles
-        for idx in range(len(candles_open)):
+        # seed with SMA of first `length` prices
+        ema_values[self.length - 1] = np.mean(prices[: self.length])
 
-            # not enough data points yet
-            if idx < self.length - 1:
-                ema_values.append(0.0)
-                continue
+        # EMA calculation (recursive dependency requires loop)
+        for i in range(self.length, n):
+            ema_values[i] = alpha * prices[i] + (1 - alpha) * ema_values[i - 1]
 
-            # first EMA = SMA of first `length` prices
-            if idx == self.length - 1:
-                sma = sum(candles_open[: self.length]) / self.length
-                ema_values.append(sma)
-
-            # EMA = alpha * current_price + (1 - alpha) * previous_EMA
-            else:
-                ema_value = alpha * candles_open[idx] + (1 - alpha) * ema_values[-1]
-                ema_values.append(ema_value)
-
-        # return the EMA values
+        # return values
         return ema_values

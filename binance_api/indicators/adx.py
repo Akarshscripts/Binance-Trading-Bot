@@ -5,8 +5,11 @@ This module contains the ADX indicator logic.
 # 1st party imports
 from typing import List, Tuple
 
+# 3rd party imports
+import numpy as np
+
 # local imports
-from binance_api.indicators.abstract import Indicator
+from binance_api.indicators.abstract import Indicator, AvailableIndicators
 
 
 class ADX(Indicator):
@@ -26,7 +29,7 @@ class ADX(Indicator):
         adx_smoothing (int): The period for ADX smoothing.
     """
 
-    NAME = "ADX"
+    NAME = AvailableIndicators.ADX
 
     def __init__(self, di_length: int = 14, adx_smoothing: int = 14) -> None:
         """
@@ -39,114 +42,92 @@ class ADX(Indicator):
         self.di_length = di_length
         self.adx_smoothing = adx_smoothing
 
-    def _calc_true_range(self, high: float, low: float, prev_close: float) -> float:
-        """Calculate True Range for a single bar."""
-        return max(high - low, abs(high - prev_close), abs(low - prev_close))
-
-    def _rma(self, values: List[float], length: int) -> List[float]:
+    def _rma(self, values: np.ndarray, length: int) -> np.ndarray:
         """
-        Calculate RMA (Wilder's smoothing) for a list of values.
+        Calculate RMA (Wilder's smoothing) for an array of values (vectorized).
 
         Args:
-            values: List of values to smooth.
+            values: Array of values to smooth.
             length: Smoothing period.
 
         Returns:
-            List of RMA values.
+            np.ndarray of RMA values.
         """
-        rma_values = []
-        alpha = 1 / length
+        n = len(values)
+        rma_values = np.zeros(n, dtype=np.float64)
 
-        for idx in range(len(values)):
+        if n < length:
+            return rma_values
 
-            # not enough data points yet
-            if idx < length - 1:
-                rma_values.append(0.0)
-                continue
+        alpha = 1.0 / length
 
-            # first RMA = SMA of first `length` values
-            if idx == length - 1:
-                sma = sum(values[:length]) / length
-                rma_values.append(sma)
+        # first RMA = SMA of first `length` values
+        rma_values[length - 1] = np.mean(values[:length])
 
-            # RMA = alpha * current + (1 - alpha) * previous_RMA
-            else:
-                rma = alpha * values[idx] + (1 - alpha) * rma_values[-1]
-                rma_values.append(rma)
+        # RMA = alpha * current + (1 - alpha) * previous_RMA
+        for i in range(length, n):
+            rma_values[i] = alpha * values[i] + (1 - alpha) * rma_values[i - 1]
 
         return rma_values
 
     def get_value(
         self,
-        candles_high: List[float],
-        candles_low: List[float],
-        candles_close: List[float],
-    ) -> Tuple[List[float], List[float], List[float]]:
+        candles_high: List[float] | np.ndarray,
+        candles_low: List[float] | np.ndarray,
+        candles_close: List[float] | np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Calculate ADX, +DI, and -DI values for a series of candle data.
+        Calculate ADX, +DI, and -DI values for a series of candle data (vectorized).
 
         Args:
-            candles_high: List of candle high prices (oldest to newest).
-            candles_low: List of candle low prices (oldest to newest).
-            candles_close: List of candle close prices (oldest to newest).
+            candles_high: Array of candle high prices (oldest to newest).
+            candles_low: Array of candle low prices (oldest to newest).
+            candles_close: Array of candle close prices (oldest to newest).
 
         Returns:
-            Tuple of (adx_values, plus_di_values, minus_di_values).
+            Tuple of (adx_values, plus_di_values, minus_di_values) as np.ndarray.
         """
-        n = len(candles_high)
+        # convert to numpy arrays
+        high = np.asarray(candles_high, dtype=np.float64)
+        low = np.asarray(candles_low, dtype=np.float64)
+        close = np.asarray(candles_close, dtype=np.float64)
+        n = len(high)
 
         if n < 2:
-            return [0.0] * n, [0.0] * n, [0.0] * n
+            zeros = np.zeros(n, dtype=np.float64)
+            return zeros, zeros.copy(), zeros.copy()
 
-        # calculate True Range, +DM, -DM for each bar
-        tr_list = [0.0]  # first bar has no TR
-        plus_dm_list = [0.0]
-        minus_dm_list = [0.0]
+        # calculate True Range (vectorized)
+        tr = np.zeros(n, dtype=np.float64)
+        tr[1:] = np.maximum(
+            high[1:] - low[1:],
+            np.maximum(np.abs(high[1:] - close[:-1]), np.abs(low[1:] - close[:-1])),
+        )
 
-        for i in range(1, n):
-            # true range
-            tr = self._calc_true_range(
-                candles_high[i], candles_low[i], candles_close[i - 1]
-            )
-            tr_list.append(tr)
+        # calculate directional movement (vectorized)
+        up = np.zeros(n, dtype=np.float64)
+        down = np.zeros(n, dtype=np.float64)
+        up[1:] = high[1:] - high[:-1]
+        down[1:] = low[:-1] - low[1:]
 
-            # directional movement
-            up = candles_high[i] - candles_high[i - 1]
-            down = candles_low[i - 1] - candles_low[i]
-
-            plus_dm = up if (up > down and up > 0) else 0.0
-            minus_dm = down if (down > up and down > 0) else 0.0
-
-            plus_dm_list.append(plus_dm)
-            minus_dm_list.append(minus_dm)
+        # +DM and -DM conditions
+        plus_dm = np.where((up > down) & (up > 0), up, 0.0)
+        minus_dm = np.where((down > up) & (down > 0), down, 0.0)
 
         # apply RMA smoothing
-        tr_rma = self._rma(tr_list, self.di_length)
-        plus_dm_rma = self._rma(plus_dm_list, self.di_length)
-        minus_dm_rma = self._rma(minus_dm_list, self.di_length)
+        tr_rma = self._rma(tr, self.di_length)
+        plus_dm_rma = self._rma(plus_dm, self.di_length)
+        minus_dm_rma = self._rma(minus_dm, self.di_length)
 
-        # calculate +DI and -DI
-        plus_di = []
-        minus_di = []
+        # calculate +DI and -DI (vectorized with safe division)
+        plus_di = np.where(tr_rma != 0, 100 * plus_dm_rma / tr_rma, 0.0)
+        minus_di = np.where(tr_rma != 0, 100 * minus_dm_rma / tr_rma, 0.0)
 
-        for i in range(n):
-            if tr_rma[i] == 0:
-                plus_di.append(0.0)
-                minus_di.append(0.0)
-            else:
-                plus_di.append(100 * plus_dm_rma[i] / tr_rma[i])
-                minus_di.append(100 * minus_dm_rma[i] / tr_rma[i])
-
-        # calculate DX
-        dx_list = []
-        for i in range(n):
-            di_sum = plus_di[i] + minus_di[i]
-            if di_sum == 0:
-                dx_list.append(0.0)
-            else:
-                dx_list.append(100 * abs(plus_di[i] - minus_di[i]) / di_sum)
+        # calculate DX (vectorized with safe division)
+        di_sum = plus_di + minus_di
+        dx = np.where(di_sum != 0, 100 * np.abs(plus_di - minus_di) / di_sum, 0.0)
 
         # apply RMA to DX to get ADX
-        adx_values = self._rma(dx_list, self.adx_smoothing)
+        adx_values = self._rma(dx, self.adx_smoothing)
 
         return adx_values, plus_di, minus_di
