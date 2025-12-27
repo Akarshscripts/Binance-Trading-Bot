@@ -120,12 +120,15 @@ class ADX(Indicator):
         minus_dm_rma = self._rma(minus_dm, self.di_length)
 
         # calculate +DI and -DI (vectorized with safe division)
-        plus_di = np.where(tr_rma != 0, 100 * plus_dm_rma / tr_rma, 0.0)
-        minus_di = np.where(tr_rma != 0, 100 * minus_dm_rma / tr_rma, 0.0)
+        plus_di = np.zeros(n, dtype=np.float64)
+        minus_di = np.zeros(n, dtype=np.float64)
+        np.divide(100 * plus_dm_rma, tr_rma, out=plus_di, where=tr_rma != 0)
+        np.divide(100 * minus_dm_rma, tr_rma, out=minus_di, where=tr_rma != 0)
 
         # calculate DX (vectorized with safe division)
         di_sum = plus_di + minus_di
-        dx = np.where(di_sum != 0, 100 * np.abs(plus_di - minus_di) / di_sum, 0.0)
+        dx = np.zeros(n, dtype=np.float64)
+        np.divide(100 * np.abs(plus_di - minus_di), di_sum, out=dx, where=di_sum != 0)
 
         # apply RMA to DX to get ADX
         adx_values = self._rma(dx, self.adx_smoothing)

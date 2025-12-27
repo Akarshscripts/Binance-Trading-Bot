@@ -13,3 +13,4 @@ wheels/
 wandb/
 *.csv
 .ipynb_checkpoints/
+*.pth

@@ -21,40 +21,39 @@ from torch.utils.data import DataLoader, TensorDataset
 
 # local imports
 from neural_network import StockModel
-from settings import project_settings
 from dataset_handler import DataManager
 
 # --------------------------------------------------
 # GLOBAL SPEED SETTINGS
 # --------------------------------------------------
-DEVICE = project_settings.DEVICE
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 if DEVICE == "cuda":
     torch.backends.cudnn.benchmark = True
+print("Using device: ", DEVICE)
+
 
 # --------------------------------------------------
 # SWEEP CONFIG
 # --------------------------------------------------
 SWEPP_CONFIG = {
-    "name": "stock_prediction_sweep_2",
-    "method": "grid",
-    "metric": {"goal": "minimize", "name": "direction_loss"},
+    "name": "direction_only_sweep_2",
+    "method": "bayes",
+    "metric": {"goal": "maximize", "name": "direction_accuracy"},
     "parameters": {
-        "INPUT_SIZE": {"value": 5},
-        "LSTM_HIDDEN_SIZE": {"value": 128},
-        "LSTM_NUM_LAYERS": {"value": 2},
-        "LSTM_DROPOUT": {"value": 0.2},
-        "FC1_OUT_FEATURES": {"value": 64},
-        "FC_DROPOUT": {"value": 0.2},
-        "OUTPUT_SIZE": {"value": 5},
-        "EPOCHS": {"values": [64, 128, 256, 512]},
-        "BATCH_SIZE": {"values": [64, 256, 1024]},
-        "DIRECTION_LOSS_WEIGHT": {"values": [1, 4, 6]},
-        "MAX_LOSS_WEIGHT": {"values": [1, 2]},
-        "MIN_LOSS_WEIGHT": {"values": [1, 2]},
-        "LEARNING_RATE": {"value": 0.001},
-        "FLUCTUATION_LOSS_WEIGHT": {"values": [1, 2, 3]},
-        "CROSS_ENTROPY_LOSS_WEIGHTS": {"values": [[1, 3, 3], [2, 6, 6], [2, 8, 8]]},
+        "INPUT_SIZE": {"value": 8},
+        "LSTM_HIDDEN_SIZE": {"values": [32, 64, 128, 256]},
+        "LSTM_NUM_LAYERS": {"values": [2, 3]},
+        "LSTM_DROPOUT": {"values": [0.3, 0.4, 0.5]},
+        "FC1_OUT_FEATURES": {"values": [16, 32, 64, 128]},
+        "FC_DROPOUT": {"values": [0.4, 0.5, 0.6]},
+        "NUM_CLASSES": {"value": 3},
+        "VAL_PATIENCE": {"value": 10},
+        "EPOCHS": {"values": [50, 100, 150]},
+        "BATCH_SIZE": {"values": [32, 64, 128, 256]},
+        "LEARNING_RATE": {"values": [0.0001, 0.001]},
+        "CROSS_ENTROPY_LOSS_WEIGHTS": {"values": [[1, 1, 1], [1, 1.5, 1.5], [1, 2, 2]]},
+        "GRADIENT_CLIP": {"value": 1.0},
     },
 }
 
@@ -65,11 +64,11 @@ def train_model(
     train_loader: DataLoader,
     scaler: torch.amp.GradScaler,
     optimizer: torch.optim.Optimizer,
-    regression_criterion: torch.nn.MSELoss,
-    classification_criterion: torch.nn.CrossEntropyLoss,
+    scheduler: torch.optim.lr_scheduler.ReduceLROnPlateau,
+    criterion: torch.nn.CrossEntropyLoss,
 ) -> StockModel:
     """
-    Train a StockModel using the provided configuration and data.
+    Train a StockModel for direction classification.
 
     Args:
         model: The StockModel instance to train.
@@ -77,30 +76,35 @@ def train_model(
         train_loader: DataLoader containing training batches.
         scaler: GradScaler for mixed precision training.
         optimizer: Optimizer for updating model parameters.
-        regression_criterion: MSELoss for max/min price regression.
-        classification_criterion: CrossEntropyLoss for direction classification.
+        scheduler: Learning rate scheduler.
+        criterion: CrossEntropyLoss for direction classification.
 
     Returns:
         StockModel: The trained model.
     """
 
+    # get global vars
+    global testX, testY
+
     # get the config
     run_config = wandb_run.config
+
+    # early stopping variables
+    best_val_accuracy = 0.0
+    patience_counter = 0
+    best_model_state = None
+
+    # get the actual preds
+    actual_directions = testY[:, 0, 0].cpu().tolist()
 
     # train loop
     for epoch in range(run_config.EPOCHS):
 
         # switch model to training
         model.train()
-
-        # accumulate losses
-        acc_max_loss = 0.0
-        acc_min_loss = 0.0
-        acc_direction_loss = 0.0
-        acc_fluctuation_loss = 0.0
-
-        # store total loss
         total_loss = 0.0
+        correct = 0
+        total = 0
 
         # get bacthes
         for x_batch, y_batch in train_loader:
@@ -111,71 +115,85 @@ def train_model(
             # use float16 or float32 based on the device
             with torch.amp.autocast(device_type="cuda", enabled=(DEVICE == "cuda")):
 
-                # make prediction
-                raw_max_pred, raw_min_pred, raw_direction_pred = model(x_batch)
+                # model returns direction logits only
+                direction_pred = model(x_batch)
 
-                # extract the final predictions
-                max_pred = raw_max_pred[:, -1]
-                min_pred = raw_min_pred[:, -1]
-                direction_pred = raw_direction_pred[:, -1]
+                # get labels (label is now at index 0)
+                labels = y_batch[:, 0, 0].long()
 
-                # calculate losses
-                max_loss = regression_criterion(max_pred.squeeze(), y_batch[:, 0, 0])
-                min_loss = regression_criterion(min_pred.squeeze(), y_batch[:, 1, 0])
-                direction_loss = classification_criterion(
-                    direction_pred, y_batch[:, 2, 0].long()
-                )
-
-                # calculate the fluctuation between each prediction to make it smoother
-                max_diff = raw_max_pred[:, 1:] - raw_max_pred[:, :-1]
-                min_diff = raw_min_pred[:, 1:] - raw_min_pred[:, :-1]
-
-                fluctuation_loss = run_config.FLUCTUATION_LOSS_WEIGHT * (
-                    regression_criterion(max_diff, torch.zeros_like(max_diff))
-                    + regression_criterion(min_diff, torch.zeros_like(min_diff))
-                )
-
-                # combine based on weights
-                loss = (
-                    direction_loss * run_config.DIRECTION_LOSS_WEIGHT
-                    + max_loss * run_config.MAX_LOSS_WEIGHT
-                    + min_loss * run_config.MIN_LOSS_WEIGHT
-                    + fluctuation_loss
-                )
+                # calculate loss
+                loss = criterion(direction_pred, labels)
 
             # backward pass
             scaler.scale(loss).backward()
+
+            # gradient clipping
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), run_config.GRADIENT_CLIP)
+
+            # take a step
             scaler.step(optimizer)
             scaler.update()
 
-            # add loss
+            # track metrics
             total_loss += loss.item()
-            acc_fluctuation_loss += fluctuation_loss.item()
-            acc_max_loss += max_loss.item() * run_config.MAX_LOSS_WEIGHT
-            acc_min_loss += min_loss.item() * run_config.MIN_LOSS_WEIGHT
-            acc_direction_loss += (
-                direction_loss.item() * run_config.DIRECTION_LOSS_WEIGHT
-            )
+            preds = direction_pred.argmax(dim=1)
+            correct += (preds == labels).sum().item()
+            total += labels.size(0)
 
         # calculate average loss
         avg_loss = total_loss / len(train_loader)
+
+        # calculate train accuracy
+        train_accuracy = correct / total
+
+        # step scheduler
+        scheduler.step(avg_loss)
 
         # wandb log
         wandb_run.log(
             {
                 "avg_loss": avg_loss,
-                "train_total_loss": total_loss,
-                "train_max_loss": acc_max_loss,
-                "train_min_loss": acc_min_loss,
-                "train_direction_loss": acc_direction_loss,
-                "train_fluctuation_loss": acc_fluctuation_loss,
+                "train_accuracy": train_accuracy,
+            }
+        )
+
+        # evaluate the model
+        direction_preds = evaluate_model(model, testX, run_config.BATCH_SIZE)
+
+        # check how good the model was
+        validation_accuracy = sum(
+            p == a for p, a in zip(direction_preds, actual_directions)
+        ) / len(actual_directions)
+
+        # === EARLY STOPPING CHECK ===
+        if validation_accuracy > best_val_accuracy:
+            best_val_accuracy = validation_accuracy
+            patience_counter = 0
+            best_model_state = model.state_dict().copy()
+        else:
+            patience_counter += 1
+
+        # log the accuracy
+        wandb_run.log(
+            {
+                "validation_accuracy": validation_accuracy,
             }
         )
 
         # log to console
-        print(f"Epoch [{epoch + 1}/{run_config.EPOCHS}] Loss: {avg_loss:.6f}")
+        print(
+            f"Epoch [{epoch + 1}/{run_config.EPOCHS}] Loss: {avg_loss:.4f} Acc: {train_accuracy:.4f} Val Acc: {validation_accuracy:.4f}"
+        )
 
-    # return the model
+        # if patience is greater than tolerable
+        if patience_counter >= run_config.VAL_PATIENCE:
+            print(f"Early stopping at epoch {epoch + 1}")
+            break
+
+    # restore best model
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
     return model
 
 
@@ -183,9 +201,9 @@ def evaluate_model(
     model: StockModel,
     testX: torch.Tensor,
     batch_size: int,
-) -> tuple[list, list, list]:
+) -> List[int]:
     """
-    Evaluate a StockModel on test data and generate predictions.
+    Evaluate a StockModel on test data and generate direction predictions.
 
     Args:
         model: The StockModel instance to evaluate.
@@ -193,14 +211,12 @@ def evaluate_model(
         batch_size: Batch size for inference.
 
     Returns:
-        tuple: (max_preds, min_preds, direction_preds) as lists.
+        List[int]: Predicted direction labels.
     """
 
     # switch model for inference
     model.eval()
-
-    # hold predicted values
-    max_preds, min_preds, direction_preds = [], [], []
+    direction_preds = []
 
     # with no gradient
     with torch.no_grad():
@@ -211,24 +227,15 @@ def evaluate_model(
             # get current batch
             x_batch = testX[i : i + batch_size]
 
-            # predict
-            max_pred, min_pred, direction_pred = model(x_batch)
+            # model returns direction logits only
+            direction_pred = model(x_batch)
 
-            # we want the last timestep prediction for each sequence in the batch
-            # max_pred shape: (batch_size, sequence_length)
-            # we take the last timestep: max_pred[:, -1]
-            # this gives us (batch_size,) for max and min predictions
-            max_pred_last = max_pred[:, -1].cpu()
-            min_pred_last = min_pred[:, -1].cpu()
-            direction_pred_last = direction_pred[:, -1].cpu()
+            # get predicted class
+            preds = direction_pred.argmax(dim=1).cpu().tolist()
+            direction_preds.extend(preds)
 
-            # append
-            max_preds.extend(max_pred_last.tolist())
-            min_preds.extend(min_pred_last.tolist())
-            direction_preds.extend(direction_pred_last.argmax(dim=1).tolist())
-
-    # return the predictions
-    return max_preds, min_preds, direction_preds
+    # return
+    return direction_preds
 
 
 def create_confusion_matrix(
@@ -306,25 +313,7 @@ def run_sweep():
     sweep_config = wandb_run.config
 
     # log the config once
-    wandb.log(
-        {
-            "INPUT_SIZE": wandb_run.config.INPUT_SIZE,
-            "LSTM_HIDDEN_SIZE": sweep_config.LSTM_HIDDEN_SIZE,
-            "LSTM_NUM_LAYERS": sweep_config.LSTM_NUM_LAYERS,
-            "LSTM_DROPOUT": sweep_config.LSTM_DROPOUT,
-            "FC1_OUT_FEATURES": sweep_config.FC1_OUT_FEATURES,
-            "FC_DROPOUT": sweep_config.FC_DROPOUT,
-            "OUTPUT_SIZE": sweep_config.OUTPUT_SIZE,
-            "EPOCHS": sweep_config.EPOCHS,
-            "BATCH_SIZE": sweep_config.BATCH_SIZE,
-            "DIRECTION_LOSS_WEIGHT": sweep_config.DIRECTION_LOSS_WEIGHT,
-            "MAX_LOSS_WEIGHT": sweep_config.MAX_LOSS_WEIGHT,
-            "MIN_LOSS_WEIGHT": sweep_config.MIN_LOSS_WEIGHT,
-            "LEARNING_RATE": sweep_config.LEARNING_RATE,
-            "FLUCTUATION_LOSS_WEIGHT": sweep_config.FLUCTUATION_LOSS_WEIGHT,
-            "CROSS_ENTROPY_LOSS_WEIGHTS": sweep_config.CROSS_ENTROPY_LOSS_WEIGHTS,
-        }
-    )
+    wandb.log(wandb.config)
 
     # setup training dataset
     train_dataset = TensorDataset(trainX, trainY)
@@ -336,92 +325,71 @@ def run_sweep():
         pin_memory=False,
     )
 
-    # create the model
+    # create the model for direction classification
     model = StockModel(
-        sweep_config.INPUT_SIZE,
-        sweep_config.LSTM_HIDDEN_SIZE,
-        sweep_config.LSTM_NUM_LAYERS,
-        sweep_config.LSTM_DROPOUT,
-        sweep_config.FC1_OUT_FEATURES,
-        sweep_config.FC_DROPOUT,
-        sweep_config.OUTPUT_SIZE,
+        input_size=sweep_config.INPUT_SIZE,
+        lstm_layer_out=sweep_config.LSTM_HIDDEN_SIZE,
+        lstm_layer_num=sweep_config.LSTM_NUM_LAYERS,
+        lstm_dropout=sweep_config.LSTM_DROPOUT,
+        fc1_out=sweep_config.FC1_OUT_FEATURES,
+        fc_dropout=sweep_config.FC_DROPOUT,
+        num_classes=sweep_config.NUM_CLASSES,
         device=DEVICE,
     )
 
     # create the optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=sweep_config.LEARNING_RATE)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=sweep_config.LEARNING_RATE)
 
-    # convert array to tensor
-    CROSS_ENTROPY_LOSS_WEIGHTS = torch.tensor(
-        sweep_config.CROSS_ENTROPY_LOSS_WEIGHTS, dtype=torch.float, device=DEVICE
+    # create learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, factor=0.5, patience=5
     )
 
-    # create loss functions for regression (max/min) and classification (direction)
-    regression_criterion = NN.MSELoss()
-    classification_criterion = NN.CrossEntropyLoss(weight=CROSS_ENTROPY_LOSS_WEIGHTS)
+    # create loss function with class weights
+    class_weights = torch.tensor(
+        sweep_config.CROSS_ENTROPY_LOSS_WEIGHTS, dtype=torch.float, device=DEVICE
+    )
+    criterion = NN.CrossEntropyLoss(weight=class_weights)
 
-    # create a scaler
+    # create a scaler for mixed precision
     scaler = torch.amp.GradScaler(enabled=(DEVICE == "cuda"))
 
     # train the model
     model = train_model(
         model=model,
-        scaler=scaler,
-        optimizer=optimizer,
         wandb_run=wandb_run,
         train_loader=train_loader,
-        regression_criterion=regression_criterion,
-        classification_criterion=classification_criterion,
+        scaler=scaler,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        criterion=criterion,
     )
 
     # evaluate the model
-    max_preds, min_preds, direction_preds = evaluate_model(
+    direction_preds = evaluate_model(
         model=model,
         testX=testX,
         batch_size=sweep_config.BATCH_SIZE,
     )
 
-    # compare the direction preds and calculate accuracy
-    actual_directions = testY[:, 2, 0].cpu().tolist()
+    # calculate accuracy
+    actual_directions = testY[:, 0, 0].cpu().tolist()
     correct = sum(p == a for p, a in zip(direction_preds, actual_directions))
     direction_accuracy = correct / len(actual_directions)
 
     # create confusion matrix
-    confusion_matrix = create_confusion_matrix(actual_directions, direction_preds)
+    cm_figure = create_confusion_matrix(actual_directions, direction_preds)
 
-    # get the actual max and min preds
-    actual_max_preds = testY[:, 0, 0].cpu().tolist()
-    actual_min_preds = testY[:, 1, 0].cpu().tolist()
-
-    # shorten the arrays to 5000 for logging (wandb restrictions)
-    if len(actual_min_preds) >= 5000:
-        max_preds = max_preds[:5000]
-        min_preds = min_preds[:5000]
-        actual_max_preds = actual_max_preds[:5000]
-        actual_min_preds = actual_min_preds[:5000]
-
-    # xs for line series
-    xs = list(range(len(max_preds)))
-
-    # log to wandb and upload graphs
+    # log to wandb
     wandb_run.log(
         {
             "direction_accuracy": direction_accuracy,
-            "confusion_matrix": wandb.Image(confusion_matrix),
-            "max_pred_plot": wandb.plot.line_series(
-                xs=xs,
-                ys=[max_preds, actual_max_preds],
-                keys=["predicted", "actual"],
-                title="Actual vs Predicted Maximum Price",
-            ),
-            "min_pred_plot": wandb.plot.line_series(
-                xs=xs,
-                ys=[min_preds, actual_min_preds],
-                keys=["predicted", "actual"],
-                title="Actual vs Predicted Minimum Price",
-            ),
+            "confusion_matrix": wandb.Image(cm_figure),
         }
     )
+
+    # close figure to free memory
+    plt.close(cm_figure)
 
 
 if __name__ == "__main__":
@@ -429,22 +397,29 @@ if __name__ == "__main__":
     # login
     wandb.login()
 
-    # the csv file name
-    csv_file_name = "XRP_USDT.csv"
-    dataframe_manager = DataManager(
-        csv_file=csv_file_name, device=DEVICE, train_ratio=0.9
-    )
+    # constants
+    CSV_FILE_NAME = "XRP_USDT.csv"
+    FEATURE_COLS = [
+        "open",
+        "volume",
+        "ema_0_diff",
+        "ema_1_diff",
+        "rsi_2",
+        "adx_3",
+        "return",
+        "label",
+    ]
+    TARGET_COL = ["label"]
 
-    # the columns to use
-    feature_cols = ["open", "EMA_0_diff", "EMA_1_diff", "ADX_2", "RSI_3"]
-    target_col = ["future_max", "future_min", "label"]
+    # the csv file name
+    dataframe_manager = DataManager(csv_file=CSV_FILE_NAME, device=DEVICE)
 
     # get training and testing tensors
     trainX, trainY = dataframe_manager.get_train_tensors(
-        feature_col=feature_cols, target_col=target_col
+        feature_col=FEATURE_COLS, target_col=TARGET_COL
     )
     testX, testY = dataframe_manager.get_test_tensors(
-        feature_col=feature_cols, target_col=target_col
+        feature_col=FEATURE_COLS, target_col=TARGET_COL
     )
 
     # create sweep
@@ -452,7 +427,5 @@ if __name__ == "__main__":
     # print("Sweep ID: ", sweep_id)
 
     # run sweep
-    sweep_id = "4m60hnex"
-    wandb.agent(
-        sweep_id=sweep_id, function=run_sweep, project="stock-prediction", count=20
-    )
+    sweep_id = "w98fbu8r"
+    wandb.agent(sweep_id=sweep_id, function=run_sweep, project="stock-prediction")

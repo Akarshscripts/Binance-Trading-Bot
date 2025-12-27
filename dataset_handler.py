@@ -1,8 +1,9 @@
 """
-This module handles the dataset creation and conversion for stock price prediction.
+This module handles the dataset creation and conversion for stock direction classification.
 """
 
 # 1st party imports
+from dataclasses import dataclass
 from typing import Tuple, List, Optional
 
 # 3rd party imports
@@ -12,8 +13,23 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
 # local imports
-from settings import project_settings
-from binance_api.indicators import Indicator
+from binance_api.indicators import Indicator, AvailableIndicators
+
+
+@dataclass
+class IndicatorColumn:
+    """
+    Represents a column of indicator values to be added to the dataset.
+
+    Attributes:
+        name: The name of the indicator column.
+        values: Array of indicator values.
+        is_main_column: Whether this is a primary indicator column. Defaults to True.
+    """
+
+    name: str
+    values: np.ndarray
+    is_main_column: bool = True
 
 
 class DataManager:
@@ -85,6 +101,191 @@ class DataManager:
         self.train_df = self.df[: self.split_idx].reset_index(drop=True)
         self.test_df = self.df[self.split_idx :].reset_index(drop=True)
 
+    def __calculate_indicators(
+        self,
+        candles_open: np.ndarray,
+        candles_close: np.ndarray,
+        candles_high: np.ndarray,
+        candles_low: np.ndarray,
+    ) -> List[IndicatorColumn]:
+        """
+        Calculate technical indicators and add them to the dataframe.
+
+        Args:
+            candles_open (np.ndarray): List of opening prices.
+            candles_close (np.ndarray): List of closing prices.
+            candles_high (np.ndarray): List of high prices.
+            candles_low (np.ndarray): List of low prices.
+
+        Returns:
+            List[IndicatorColumn]: List of column names created for the indicators.
+        """
+
+        # created columns
+        result = []
+
+        # populate indicators into their column
+        for idx, indicator in enumerate(self.indicators):
+
+            # create col name
+            col_name = f"{indicator.NAME.value}_{idx}"
+
+            # handle each indicator type with its specific signature
+            if indicator.NAME == AvailableIndicators.EMA:
+
+                # EMA takes candles_open
+                ema_values: np.ndarray = indicator.get_value(candles_open)
+                ema_indicator_res = IndicatorColumn(name=col_name, values=ema_values)
+
+                # create the ema_diff col (percentage difference for better scaling)
+                diff_col_values = (ema_values - candles_open) / candles_open
+                ema_diff_open_res = IndicatorColumn(
+                    name=f"{col_name}_diff", values=diff_col_values
+                )
+
+                # append the indicator result
+                result.append(ema_indicator_res)
+                result.append(ema_diff_open_res)
+
+            elif indicator.NAME == AvailableIndicators.RSI:
+
+                # RSI takes candles_close and scale it b/w 0 - 1
+                rsi_values = indicator.get_value(candles_close) / 100
+
+                # append the indicator result
+                result.append(IndicatorColumn(name=col_name, values=rsi_values))
+
+            elif indicator.NAME == AvailableIndicators.ADX:
+
+                # ADX takes (high, low, close) and returns tuple of 3 arrays
+                adx_vals, plus_di, minus_di = indicator.get_value(
+                    candles_high, candles_low, candles_close
+                )
+
+                # scale to 0-1 (already numpy arrays from ADX)
+                adx_vals = adx_vals / 100
+                plus_di = plus_di / 100
+                minus_di = minus_di / 100
+
+                # append the indicator results
+                result.append(IndicatorColumn(name=col_name, values=adx_vals))
+                result.append(
+                    IndicatorColumn(
+                        name=f"{col_name}_plus_di", values=plus_di, is_main_column=False
+                    )
+                )
+                result.append(
+                    IndicatorColumn(
+                        name=f"{col_name}_minus_di",
+                        values=minus_di,
+                        is_main_column=False,
+                    )
+                )
+
+        # return the indicator results
+        return result
+
+    def __calculate_max_min_return(
+        self,
+        look_ahead: int,
+        candles_high: np.ndarray,
+        candles_low: np.ndarray,
+        candles_close: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Calculate future maximum prices, minimum prices, and returns.
+
+        This method looks ahead a specified number of candles to find the maximum
+        high price, minimum low price, and calculates the return based on the
+        current close price.
+
+        Args:
+            look_ahead: Number of future candles to look ahead.
+            candles_high: Array of high prices for each candle.
+            candles_low: Array of low prices for each candle.
+            candles_close: Array of close prices for each candle.
+
+        Returns:
+            Tuple containing:
+                - future_maxes: Maximum high prices within the look-ahead window.
+                - future_mins: Minimum low prices within the look-ahead window.
+                - returns: Calculated returns based on the prediction window.
+        """
+
+        # length
+        n = len(candles_high)
+
+        # pre-allocate arrays
+        future_maxes = np.zeros(n, dtype=np.float64)
+        future_mins = np.zeros(n, dtype=np.float64)
+        returns = np.zeros(n, dtype=np.float64)
+
+        # calculate rolling max/min using sliding window
+        for i in range(n):
+            end_idx = min(i + look_ahead, n)
+            future_maxes[i] = np.max(candles_high[i:end_idx])
+            future_mins[i] = np.min(candles_low[i:end_idx])
+
+        # calculate returns (vectorized)
+        # for indices where we can look ahead fully
+        valid_end = n - look_ahead
+        if valid_end > 0:
+            returns[:valid_end] = (
+                candles_close[look_ahead:] - candles_close[:valid_end]
+            ) / candles_close[:valid_end]
+
+        # for remaining indices, use last close
+        if valid_end < n:
+            returns[valid_end:] = (
+                candles_close[-1] - candles_close[valid_end:]
+            ) / candles_close[valid_end:]
+
+        # return
+        return future_maxes, future_mins, returns
+
+    def __scale_columns(
+        self,
+        train_df: pd.DataFrame,
+        test_df: pd.DataFrame,
+        cols_to_scale: List[str],
+        cols_to_log_scale: List[str] = None,
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """
+        Scale specified columns using StandardScaler.
+
+        Fits the scaler on training data only to prevent data leakage,
+        then transforms both training and test data.
+
+        Args:
+            train_df: Training dataframe.
+            test_df: Test dataframe.
+            cols_to_scale: List of column names to scale using StandardScaler.
+            cols_to_log_scale: List of column names to apply log1p transformation
+                before scaling. Defaults to None.
+
+        Returns:
+            Tuple[pd.DataFrame, pd.DataFrame]: Scaled training and test dataframes.
+        """
+
+        # create copies to avoid modifying original
+        train_df = train_df.copy()
+        test_df = test_df.copy()
+
+        # transform columns with log if any
+        if cols_to_log_scale:
+            train_df[cols_to_log_scale] = np.log1p(train_df[cols_to_log_scale])
+            test_df[cols_to_log_scale] = np.log1p(test_df[cols_to_log_scale])
+
+        # scale using standard scaler (fit only on train)
+        self.std_scaler.fit(train_df[cols_to_scale])
+        train_df[cols_to_scale] = self.std_scaler.transform(train_df[cols_to_scale])
+
+        # transform test data using the fitted scaler
+        test_df[cols_to_scale] = self.std_scaler.transform(test_df[cols_to_scale])
+
+        # return the train and test dataframe
+        return train_df, test_df
+
     def preprocess(self, threshold: float, look_ahead: int = 5) -> None:
         """
         Preprocess the data: compute indicators, calculate future prices and returns.
@@ -106,81 +307,34 @@ class DataManager:
         # regression cols to be scaled (use list for deterministic ordering)
         scalable_cols: List[str] = []
 
-        # get the fields used by indicators
-        candles_open = self.df["open"].tolist()
-        candles_close = self.df["close"].tolist()
-        candles_high = self.df["high"].tolist()
-        candles_low = self.df["low"].tolist()
+        # get the price fields
+        candles_open = self.df["open"].to_numpy(dtype=np.float64)
+        candles_close = self.df["close"].to_numpy(dtype=np.float64)
+        candles_high = self.df["high"].to_numpy(dtype=np.float64)
+        candles_low = self.df["low"].to_numpy(dtype=np.float64)
 
-        # populate indicators into their column
-        for idx, indicator in enumerate(self.indicators):
+        # calculate indicators
+        indicator_columns = self.__calculate_indicators(
+            candles_open=candles_open,
+            candles_close=candles_close,
+            candles_high=candles_high,
+            candles_low=candles_low,
+        )
 
-            # create col name
-            col_name = f"{indicator.NAME}_{idx}"
+        # populate df with indicator values
+        for col in indicator_columns:
 
-            # handle each indicator type with its specific signature
-            if indicator.NAME.lower() == "ema":
-
-                # EMA takes candles_open
-                self.df[col_name] = indicator.get_value(candles_open)
-
-                # create the ema_diff col (percentage difference for better scaling)
-                diff_col_name = f"{col_name}_diff"
-                self.df[diff_col_name] = (
-                    self.df[col_name] - self.df["open"]
-                ) / self.df["open"]
-
-                # add to be scaled later
-                scalable_cols.append(diff_col_name)
-
-            elif indicator.NAME.lower() == "rsi":
-
-                # RSI takes candles_close
-                self.df[col_name] = indicator.get_value(candles_close)
-
-                # scale by dividing by 100
-                self.df[col_name] = self.df[col_name] / 100
-
-            elif indicator.NAME.lower() == "adx":
-
-                # ADX takes (high, low, close) and returns tuple of 3 lists
-                adx_vals, plus_di, minus_di = indicator.get_value(
-                    candles_high, candles_low, candles_close
-                )
-
-                # populate all three columns, scaled by 100
-                self.df[col_name] = [v / 100 for v in adx_vals]
-                self.df[f"{col_name}_plus_di"] = [v / 100 for v in plus_di]
-                self.df[f"{col_name}_minus_di"] = [v / 100 for v in minus_di]
+            # only add the main cols
+            if col.is_main_column:
+                self.df[col.name] = col.values
 
         # The maximum high, low and returns in the NEXT N candles
-        future_maxes, future_mins, returns = [], [], []
-
-        # iterate
-        for idx in range(len(self.df)):
-
-            # current window
-            curr_highs = candles_high[idx : idx + look_ahead]
-            curr_lows = candles_low[idx : idx + look_ahead]
-
-            # update
-            future_maxes.append(max(curr_highs))
-            future_mins.append(min(curr_lows))
-
-            # update returns
-            if idx + look_ahead >= len(self.df):
-                # current candle and the last candle
-                curr_close, nth_close = candles_close[idx], candles_close[-1]
-
-            else:
-                # current candle and the nth candle
-                curr_close, nth_close = (
-                    candles_close[idx],
-                    candles_close[idx + look_ahead],
-                )
-
-            # append
-            returns.append((nth_close - curr_close) / curr_close)
+        future_maxes, future_mins, returns = self.__calculate_max_min_return(
+            look_ahead=look_ahead,
+            candles_high=candles_high,
+            candles_low=candles_low,
+            candles_close=candles_close,
+        )
 
         # populate df
         self.df["return"] = returns
@@ -197,30 +351,29 @@ class DataManager:
         self.df.loc[self.df["return"] > threshold, "label"] = 1
         self.df.loc[self.df["return"] < -threshold, "label"] = 2
 
+    def perform_scaling(
+        self, scalable_cols: List[str], cols_to_log_scale: List[str] | None
+    ):
+        """
+        Perform scaling on the specified columns.
+
+        Args:
+            scalable_cols (List[str]): List of column names to scale using StandardScaler.
+            cols_to_log_scale (List[str] | None): List of column names to apply log1p
+                transformation before scaling. Can be None if no log scaling is needed.
+        """
+
         # split the test data before scaling
         self.test_df = self.df[self.split_idx :].reset_index(drop=True)
         self.train_df = self.df[: self.split_idx].reset_index(drop=True)
 
-        # separate price cols (need log transform) from percentage cols (already normalized)
-        price_cols = ["open", "future_min", "future_max"]
-
-        # transform price columns with log (prices are always positive)
-        self.train_df[price_cols] = np.log1p(self.train_df[price_cols])
-        self.test_df[price_cols] = np.log1p(self.test_df[price_cols])
-
-        # scale the train data using standard scaler (fit only on train)
-        self.std_scaler.fit(self.train_df[scalable_cols])
-        self.train_df[scalable_cols] = self.std_scaler.transform(
-            self.train_df[scalable_cols]
-        )
-
-        # transform test data using the fitted scaler
-        self.test_df[scalable_cols] = self.std_scaler.transform(
-            self.test_df[scalable_cols]
+        # scale the data
+        scaled_train, scaled_test = self.__scale_columns(
+            self.train_df, self.test_df, scalable_cols, cols_to_log_scale
         )
 
         # after preprocessing, join the data
-        self.df = pd.concat([self.train_df, self.test_df], ignore_index=True)
+        self.df = pd.concat([scaled_train, scaled_test], ignore_index=True)
 
     def create_sequences(
         self,
