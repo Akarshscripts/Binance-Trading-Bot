@@ -9,15 +9,18 @@ from typing import Optional, List, Tuple, Literal
 
 # 3rd party imports
 import torch
+import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 # local imports
 from .nn_model import NnModel
 from settings import Constants
 from messenger import Messenger
 from dataframe_handler import DataManager
-from binance_api.indicators import Indicator, ADX, RSI, EMA
+from brokers import PaperTrader, TradeType
 from binance_api import BinanceSymbols, ChartIntervals, BinanceApi, TimeZones
+from binance_api.indicators import Indicator, ADX, RSI, EMA, FractalsIndicator
 
 
 def __create_model_inputs(
@@ -124,17 +127,17 @@ def apply_strategies(
     """
 
     # apply the 20 and 50 EMA strategy
-    ema_strategy = trading_strategy(df, Constants.LOOK_AHEAD_CANDLES)
+    ema_strategy = trading_strategy(df, Constants.LOOK_AHEAD_CANDLES * 2)
 
     # check if the ema strategy is neutral
-    if ema_strategy == "neutral":
+    if ema_strategy == "neutral" or model_output == "neutral":
         return False, ""
 
     # create msg
     msg = f"EMA Strategy: **{ema_strategy}**.\nModel Output: **{model_output}**.\nTime: **{df.iloc[-1]["timestamp"].strftime('%Y-%m-%d %H:%M:%S')}**.\nCandle Close Price: **{df.iloc[-1]["close"]:.4f}**.\n"
 
     # return the final strategy
-    return ema_strategy == model_output, msg
+    return ema_strategy != model_output, msg
 
 
 def start_predictions(
@@ -229,6 +232,7 @@ def backtest_predictions(
     discord_webhook: str,
     start_time: str,
     end_time: str,
+    risk_to_reward: float,
 ):
     """
     Backtest predictions for a given symbol and interval.
@@ -241,10 +245,11 @@ def backtest_predictions(
         discord_webhook: Discord webhook URL for sending predictions.
         start_time: Start time for backtesting in 'MM/dd/yyyy HH:mm:ss' format.
         end_time: End time for backtesting in 'MM/dd/yyyy HH:mm:ss' format.
-        lag: Additional lag in seconds before fetching data. Defaults to 30.
+        risk_to_reward: Risk to reward ratio for backtesting.
     """
 
     # instances
+    paper_trader = PaperTrader()
     binance = BinanceApi(timezone=time_zone)
     nn_model = NnModel(model_path, Constants.DEVICE)
     discord = Messenger(webhook_url=discord_webhook)
@@ -262,6 +267,7 @@ def backtest_predictions(
 
     # indicators
     indicators = [EMA(20), EMA(50), RSI(14), ADX(14)]
+    fractals = FractalsIndicator()
 
     # fetch the data from start to end
     binance_df = binance.get_symbol_info(
@@ -272,7 +278,17 @@ def backtest_predictions(
     )
 
     # main loop
-    for idx in range(Constants.SEQUENCE_LENGTH, len(binance_df)):
+    for idx in tqdm(
+        range(Constants.SEQUENCE_LENGTH, len(binance_df)),
+        total=len(binance_df) - Constants.SEQUENCE_LENGTH,
+    ):
+
+        # pass the new candle info to paper trader
+        paper_trader.update(
+            low=binance_df.iloc[idx]["low"],
+            high=binance_df.iloc[idx]["high"],
+            current_candle_timestamp=binance_df.iloc[idx]["timestamp"],
+        )
 
         # create model inputs
         curr_df = binance_df.iloc[:idx]
@@ -287,9 +303,67 @@ def backtest_predictions(
         output = nn_model.convert_preds(predictions)
 
         # merge with a custom startegy and create output message
-        send_msg, msg = apply_strategies(curr_df, output)
+        action_allowed, msg = apply_strategies(curr_df, output)
 
-        # if send_msg is true, send the message
-        if send_msg:
-            discord.send_text_message(msg)
-            print(msg)
+        # if action_allowed, take a action
+        if action_allowed:
+
+            # get the data
+            entry_price = binance_df.iloc[idx]["close"]
+            trade_start_timestamp = binance_df.iloc[idx]["timestamp"]
+            candle_highs = binance_df.iloc[:idx]["high"].values
+            candle_lows = binance_df.iloc[:idx]["low"].values
+
+            # get the fractal stop loss
+            top_sl, bottom_sl = fractals.get_value(high=candle_highs, low=candle_lows)
+
+            # check trade side
+            if output == "up":
+
+                # set trade type enum
+                trade_type = TradeType.LONG
+
+                # get the valid SL
+                valid_sl = bottom_sl[~np.isnan(bottom_sl)]
+                if len(valid_sl) == 0 or valid_sl[-1] >= entry_price:
+                    continue
+                stop_loss = valid_sl[-1]
+
+                # calculate the exit price
+                exit_price = entry_price + (
+                    abs(entry_price - stop_loss) * risk_to_reward
+                )
+            else:
+
+                # set trade type enum
+                trade_type = TradeType.SHORT
+
+                # get the valid SL
+                valid_sl = top_sl[~np.isnan(top_sl)]
+                if len(valid_sl) == 0 or valid_sl[-1] <= entry_price:
+                    continue
+                stop_loss = valid_sl[-1]
+
+                # calculate the exit price
+                exit_price = entry_price - (
+                    abs(entry_price - stop_loss) * risk_to_reward
+                )
+
+            # open the position
+            paper_trader.open_position(
+                symbol=symbol,
+                interval=interval,
+                entry_price=entry_price,
+                exit_price=exit_price,
+                stop_loss=round(stop_loss, 4),
+                trade_type=trade_type,
+                trade_start_timestamp=trade_start_timestamp,
+            )
+
+    # get the stats
+    stats = paper_trader.stats()
+
+    # print the stats
+    from pprint import pprint
+
+    pprint(stats.model_dump(mode="json", indent=4))

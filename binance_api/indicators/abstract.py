@@ -19,6 +19,7 @@ class AvailableIndicators(str, Enum):
     EMA = "ema"
     RSI = "rsi"
     ADX = "adx"
+    FRACTALS = "fractals"
     INDICATOR = "indicator"
 
 

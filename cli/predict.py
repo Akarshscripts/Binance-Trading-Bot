@@ -80,6 +80,17 @@ def add_predict_command(subparsers: _SubParsersAction):
         required=False,
     )
 
+    # add the risk to reward argument
+    predict_parser.add_argument(
+        "-rr",
+        "--risk-to-reward",
+        default=1.5,
+        type=float,
+        metavar="RISK_TO_REWARD",
+        help="The risk to reward ratio for backtesting.",
+        required=False,
+    )
+
     # add the handler
     predict_parser.set_defaults(handler=handle_predict)
 
@@ -116,6 +127,7 @@ def handle_predict(args):
 
     # check for start time and end time availability
     if args.start_time and args.end_time:
+        # start backtesting
         backtest_predictions(
             symbol=symbol,
             interval=interval,
@@ -124,9 +136,10 @@ def handle_predict(args):
             discord_webhook=args.discord,
             start_time=args.start_time,
             end_time=args.end_time,
+            risk_to_reward=args.risk_to_reward,
         )
     else:
-        # start predictions
+        # start realtime predictions
         start_predictions(
             symbol=symbol,
             interval=interval,
