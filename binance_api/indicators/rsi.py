@@ -35,7 +35,7 @@ class RSI(Indicator):
             length: The period/lookback length for the RSI calculation.
                     Default is 14 (standard RSI period).
         """
-        self.length = length
+        self.LENGTH = length
 
     def get_value(self, candles_close: List[float] | np.ndarray) -> np.ndarray:
         """
@@ -65,7 +65,7 @@ class RSI(Indicator):
         rsi_values = np.zeros(n, dtype=np.float64)
 
         # need at least length + 1 prices to calculate first RSI
-        if n < self.length + 1:
+        if n < self.LENGTH + 1:
             return rsi_values
 
         # calculate price changes
@@ -76,23 +76,23 @@ class RSI(Indicator):
         losses = -np.minimum(changes, 0)
 
         # RMA smoothing factor (Wilder's smoothing: alpha = 1/length)
-        alpha = 1 / self.length
+        alpha = 1 / self.LENGTH
 
         # first RSI = SMA of first `length` gains/losses
-        avg_gain = np.mean(gains[: self.length])
-        avg_loss = np.mean(losses[: self.length])
+        avg_gain = np.mean(gains[: self.LENGTH])
+        avg_loss = np.mean(losses[: self.LENGTH])
 
         # calculate first RSI at index length (offset by 1 for the first value)
         if avg_loss == 0:
-            rsi_values[self.length] = 100.0
+            rsi_values[self.LENGTH] = 100.0
         elif avg_gain == 0:
-            rsi_values[self.length] = 0.0
+            rsi_values[self.LENGTH] = 0.0
         else:
             rs = avg_gain / avg_loss
-            rsi_values[self.length] = 100 - (100 / (1 + rs))
+            rsi_values[self.LENGTH] = 100 - (100 / (1 + rs))
 
         # RMA calculation for remaining values
-        for i in range(self.length, len(changes)):
+        for i in range(self.LENGTH, len(changes)):
             avg_gain = alpha * gains[i] + (1 - alpha) * avg_gain
             avg_loss = alpha * losses[i] + (1 - alpha) * avg_loss
 

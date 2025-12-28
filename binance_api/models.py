@@ -25,15 +25,40 @@ class ChartIntervalInternal(BaseModel):
 
         return f"{self.time_value}{self.time_unit}"
 
+    def to_seconds(self) -> int:
+        """
+        Convert the interval to seconds.
+        """
+
+        multipliers = {"m": 60, "h": 3600, "d": 86400, "w": 604800, "M": 2592000}
+        return self.time_value * multipliers.get(self.time_unit, 1)
+
+    def __int__(self) -> int:
+        return self.to_seconds()
+
+    def __lt__(self, other: int) -> bool:
+        return self.to_seconds() < other
+
+    def __le__(self, other: int) -> bool:
+        return self.to_seconds() <= other
+
+    def __gt__(self, other: int) -> bool:
+        return self.to_seconds() > other
+
+    def __ge__(self, other: int) -> bool:
+        return self.to_seconds() >= other
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, int):
+            return self.to_seconds() == other
+        return super().__eq__(other)
+
 
 class ChartIntervals(Enum):
     """
     Model for supported chart intervals in the Binance API.
     """
 
-    ONE_MINUTE = ChartIntervalInternal(time_value=1, time_unit="m")
-    THREE_MINUTES = ChartIntervalInternal(time_value=3, time_unit="m")
-    FIVE_MINUTES = ChartIntervalInternal(time_value=5, time_unit="m")
     FIFTEEN_MINUTES = ChartIntervalInternal(time_value=15, time_unit="m")
     THIRTY_MINUTES = ChartIntervalInternal(time_value=30, time_unit="m")
     ONE_HOUR = ChartIntervalInternal(time_value=1, time_unit="h")

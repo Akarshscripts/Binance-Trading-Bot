@@ -20,8 +20,10 @@ from sklearn.metrics import confusion_matrix
 from torch.utils.data import DataLoader, TensorDataset
 
 # local imports
-from neural_network import StockModel
-from dataset_handler import DataManager
+from neural_net import StockModel
+from dataframe_handler import DataManager
+from binance_api.indicators import ADX, EMA, RSI
+
 
 # --------------------------------------------------
 # GLOBAL SPEED SETTINGS
@@ -398,7 +400,7 @@ if __name__ == "__main__":
     wandb.login()
 
     # constants
-    CSV_FILE_NAME = "XRP_USDT.csv"
+    CSV_FILE_NAME = "XRPUSDT_15m_Jan_to_Dec_2025.csv"
     FEATURE_COLS = [
         "open",
         "volume",
@@ -410,17 +412,33 @@ if __name__ == "__main__":
         "label",
     ]
     TARGET_COL = ["label"]
+    LABEL_THRESHOLD = 0.0025
+    LOOK_AHEAD = 8
+    COLS_TO_SCALE_LOG = ["open", "volume", "future_min", "future_max"]
+    SCALABLE_COLS = [
+        "open",
+        "volume",
+        "future_min",
+        "future_max",
+        "ema_0_diff",
+        "ema_1_diff",
+    ]
 
-    # the csv file name
-    dataframe_manager = DataManager(csv_file=CSV_FILE_NAME, device=DEVICE)
+    # the data manager instance
+    dm = DataManager(csv_file=CSV_FILE_NAME, device=DEVICE)
+    indicators = [EMA(20), EMA(50), RSI(14), ADX(14)]
+
+    # apply indicators and preprocessing, if not already
+    dm.preprocess(
+        indicators=indicators, threshold=LABEL_THRESHOLD, look_ahead=LOOK_AHEAD
+    )
+    dm.scale(cols=SCALABLE_COLS, log_cols=COLS_TO_SCALE_LOG)
 
     # get training and testing tensors
-    trainX, trainY = dataframe_manager.get_train_tensors(
+    trainX, trainY = dm.get_train_tensors(
         feature_col=FEATURE_COLS, target_col=TARGET_COL
     )
-    testX, testY = dataframe_manager.get_test_tensors(
-        feature_col=FEATURE_COLS, target_col=TARGET_COL
-    )
+    testX, testY = dm.get_test_tensors(feature_col=FEATURE_COLS, target_col=TARGET_COL)
 
     # create sweep
     # sweep_id = wandb.sweep(SWEPP_CONFIG, project="stock-prediction")

@@ -41,6 +41,7 @@ class ADX(Indicator):
         """
         self.di_length = di_length
         self.adx_smoothing = adx_smoothing
+        self.LENGTH = di_length
 
     def _rma(self, values: np.ndarray, length: int) -> np.ndarray:
         """

@@ -31,6 +31,7 @@ class Indicator(ABC):
     """
 
     NAME: AvailableIndicators = AvailableIndicators.INDICATOR
+    LENGTH: int = 0
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
 

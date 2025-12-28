@@ -32,7 +32,7 @@ class EMA(Indicator):
         Args:
             length: The period/lookback length for the EMA calculation.
         """
-        self.length = length
+        self.LENGTH = length
 
     def get_value(self, candles_open: List[float] | np.ndarray) -> np.ndarray:
         """
@@ -59,17 +59,17 @@ class EMA(Indicator):
         ema_values = np.zeros(n, dtype=np.float64)
 
         # not enough data
-        if n < self.length:
+        if n < self.LENGTH:
             return ema_values
 
         # smoothing factor
-        alpha = 2.0 / (self.length + 1)
+        alpha = 2.0 / (self.LENGTH + 1)
 
         # seed with SMA of first `length` prices
-        ema_values[self.length - 1] = np.mean(prices[: self.length])
+        ema_values[self.LENGTH - 1] = np.mean(prices[: self.LENGTH])
 
         # EMA calculation (recursive dependency requires loop)
-        for i in range(self.length, n):
+        for i in range(self.LENGTH, n):
             ema_values[i] = alpha * prices[i] + (1 - alpha) * ema_values[i - 1]
 
         # return values

@@ -54,8 +54,8 @@ class BinanceApi:
         self,
         symbol: BinanceSymbols,
         interval: ChartIntervals,
-        start_time: Optional[str] = None,
-        end_time: Optional[str] = None,
+        start_time: Optional[str | datetime] = None,
+        end_time: Optional[str | datetime] = None,
     ) -> pd.DataFrame:
         """
         Fetches historical candlestick (kline) data for a specific trading symbol and interval from the Binance API.
@@ -105,12 +105,14 @@ class BinanceApi:
                 "Both start_time and end_time must be provided or neither."
             )
 
-        # parse the start time
-        start_time: datetime = datetime.strptime(start_time, "%m/%d/%Y %H:%M:%S")
+        # parse the start time, if not already
+        if not isinstance(start_time, datetime):
+            start_time: datetime = datetime.strptime(start_time, "%m/%d/%Y %H:%M:%S")
         start_time_millis = int(start_time.timestamp() * 1000)
 
         # parse the end time
-        end_time: datetime = datetime.strptime(end_time, "%m/%d/%Y %H:%M:%S")
+        if not isinstance(end_time, datetime):
+            end_time: datetime = datetime.strptime(end_time, "%m/%d/%Y %H:%M:%S")
         end_time_millis = int(end_time.timestamp() * 1000)
 
         # adjust the params for start and end time if provided
@@ -227,6 +229,25 @@ class BinanceApi:
         # localize the time columns to the specified timezone
         df["timestamp"] = df["timestamp"].apply(lambda x: x.astimezone(local_tz))
         df["close_time"] = df["close_time"].apply(lambda x: x.astimezone(local_tz))
+
+        # numeric columns
+        NUMERIC_COLS = [
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "quote_asset_volume",
+            "taker_buy_base_volume",
+            "taker_buy_quote_volume",
+        ]
+
+        # convert the columns to numeric
+        df[NUMERIC_COLS] = df[NUMERIC_COLS].apply(pd.to_numeric, errors="coerce")
+        df[NUMERIC_COLS] = df[NUMERIC_COLS].astype("float32")
+
+        # drop the ignore column
+        df.drop(columns=["ignore"], inplace=True)
 
         # return
         return df
