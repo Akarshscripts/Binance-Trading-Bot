@@ -3,7 +3,7 @@ This module contains the argument parser for the predict command.
 """
 
 # 1st party imports
-import os
+from datetime import datetime
 from argparse import _SubParsersAction
 
 # local imports
@@ -44,22 +44,12 @@ def add_predict_command(subparsers: _SubParsersAction):
         help="The chart interval to use.",
     )
 
-    # add the model path argument
-    predict_parser.add_argument(
-        "-m",
-        "--model-path",
-        required=True,
-        metavar="MODEL_PATH",
-        help="The path to the trained model.",
-    )
-
     # add the discord webhook url argument
     predict_parser.add_argument(
         "-d",
         "--discord",
         metavar="URL",
         help="The discord webhook url to send the predictions to.",
-        required=True,
     )
 
     # add the start time argument
@@ -80,15 +70,15 @@ def add_predict_command(subparsers: _SubParsersAction):
         required=False,
     )
 
-    # add the risk to reward argument
+    # add the brokerage argument
     predict_parser.add_argument(
-        "-rr",
-        "--risk-to-reward",
-        default=1.5,
-        type=float,
-        metavar="RISK_TO_REWARD",
-        help="The risk to reward ratio for backtesting.",
+        "-b",
+        "--brokerage",
+        metavar="BROKERAGE",
+        help="The brokerage to use for backtesting.",
         required=False,
+        default=0.02,
+        type=float,
     )
 
     # add the handler
@@ -103,18 +93,15 @@ def handle_predict(args):
         args: The parsed command line arguments containing:
             - pair: The crypto trading pair symbol (e.g., XRPUSDT).
             - interval: The chart interval string (e.g., 15m, 1h).
-            - model_path: Path to the trained model file.
             - discord: Discord webhook URL for sending predictions.
+            - start_time: The start time for backtesting in 'MM/dd/yyyy HH:mm:ss' format.
+            - end_time: The end time for backtesting in 'MM/dd/yyyy HH:mm:ss' format.
     """
 
-    # check if the model exists
-    if not os.path.exists(args.model_path):
-        raise FileNotFoundError(f"Model file not found at {args.model_path}")
-
-    # convert the pair from str to BinanceSymbols
+    # convert the pair from 'str' to 'BinanceSymbols'
     symbol = BinanceSymbols(args.pair)
 
-    # convert the interval from str to ChartIntervals
+    # convert the interval from 'str' to 'ChartIntervals'
     value = [i for i in args.interval if i.isdigit()]
     unit = [i for i in args.interval if not i.isdigit()]
     char_internal_val = ChartIntervalInternal(
@@ -123,27 +110,34 @@ def handle_predict(args):
     interval = ChartIntervals(char_internal_val)
 
     # import and run the function
-    from commands import start_predictions, backtest_predictions
+    from commands import start_algorithm, backtest_algorithm
 
-    # check for start time and end time availability
-    if args.start_time and args.end_time:
+    # check for start time availability
+    if args.start_time:
+
+        # set the end time as today if not provided
+        if not args.end_time:
+            args.end_time = datetime.now().strftime("%m/%d/%Y %H:%M:%S")
+
         # start backtesting
-        backtest_predictions(
+        backtest_algorithm(
             symbol=symbol,
             interval=interval,
             time_zone=TimeZones.INDIA,
-            model_path=args.model_path,
-            discord_webhook=args.discord,
             start_time=args.start_time,
             end_time=args.end_time,
-            risk_to_reward=args.risk_to_reward,
+            brokerage=args.brokerage,
         )
+
     else:
+        # check if the discord webhook is provided
+        if not args.discord:
+            raise ValueError("Discord webhook is required for realtime predictions.")
+
         # start realtime predictions
-        start_predictions(
+        start_algorithm(
             symbol=symbol,
             interval=interval,
             time_zone=TimeZones.INDIA,
-            model_path=args.model_path,
             discord_webhook=args.discord,
         )

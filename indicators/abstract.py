@@ -19,8 +19,12 @@ class AvailableIndicators(str, Enum):
     EMA = "ema"
     RSI = "rsi"
     ADX = "adx"
+    ATR = "atr"
+    VWAP = "vwap"
     FRACTALS = "fractals"
     INDICATOR = "indicator"
+    SUPERTREND = "supertrend"
+    BOLLINGER_BANDS = "bollinger_bands"
 
 
 class Indicator(ABC):

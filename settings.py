@@ -10,7 +10,7 @@ from typing import List
 import torch
 
 # construct csv file path
-csv_file_name = "XRPUSDT_15m_Jan_to_Dec_2025.csv"
+csv_file_name = "XRPUSDT_5m_2024_2025.csv"
 predicted_file_name = "xrp_usdt_processed.csv"
 csv_file_path = os.path.join(os.path.dirname(__file__), csv_file_name)
 processed_file_path = os.path.join(os.path.dirname(__file__), predicted_file_name)
@@ -30,51 +30,20 @@ class Constants:
     MODEL_SAVE_PATH: str = model_save_path
 
     # DATASET PARAMS
-    TARGET_COL: List[str] = ["label"]
+    COL_LAGS: List[int] = [1, 3, 5, 10, 15, 20]
     TRAIN_RATIO: float = 0.8
-    LABEL_THRESH: float = 0.003
-    LOOK_AHEAD_CANDLES: int = 8
-    COLS_TO_SCALE_LOG: List[str] = ["open", "volume", "future_min", "future_max"]
-    SCALABLE_COLS: List[str] = [
-        "open",
-        "volume",
-        "future_min",
-        "future_max",
-        "ema_0_diff",
-        "ema_1_diff",
-    ]
-    FEATURE_COLS: List[str] = [
-        "open",
-        "volume",
-        "ema_0_diff",
-        "ema_1_diff",
-        "rsi_2",
-        "adx_3",
-        "return",
-        "label",
-    ]
-    COLS_TO_EXTRACT: List[str] = [
-        "open",
-        "volume",
-        "ema_0_diff",
-        "ema_1_diff",
-        "rsi_2",
-        "adx_3",
-        "return",
-        "future_min",
-        "future_max",
-        "label",
-    ]
+    ATR_COL_NAME: str = "atr_2"
+    COLS_TO_DROP = ["timestamp", "close_time", "taker_buy_base_volume", "taker_buy_quote_volume", "number_of_trades", "quote_asset_volume"]
+    SCALABLE_COLS: List[str] = ["open", "high", "low", "close", "volume", "bollinger_bands_0_diff", "vwap_1", "atr_2", "rsi_3_centered_diff"]
+    COLS_TO_STACK: List[str] = ["volume", "bollinger_bands_0_diff", "vwap_1", "atr_2", "rsi_3_centered_diff"]
+    R_MULTIPLE_REWARD: float = 1.75
+    MAX_ALLOWED_TRADE_LENGTH: int = 36
+    TARGET_COL: List[str] = ["r_multiple"]
 
     # MODEL ARCHITECTURE
-    INPUT_SIZE: int = 8
-    NUM_CLASSES: int = 3
-    FC_DROPOUT: float = 0.4
-    LSTM_DROPOUT: float = 0.4
-    LSTM_NUM_LAYERS: int = 2
-    LSTM_HIDDEN_SIZE: int = 32
-    FC1_OUT_FEATURES: int = 128
-    OUT_CLASS: List[str] = ["neutral", "up", "down"]
+    DROPOUT: float = 0.2
+    FC1_INPUT_SIZE: int = 64
+    FC2_INPUT_SIZE: int = 32
 
     # TRAINING PARAMS
     EPOCHS: int = 150
@@ -82,8 +51,4 @@ class Constants:
     VAL_PATIENCE: int = 10
     GRADIENT_CLIP: float = 1.0
     LEARNING_RATE: float = 0.001
-    SEQUENCE_LENGTH: int = 192
     DEVICE: str = "cuda" if torch.cuda.is_available() else "cpu"
-
-    # Loss weights for [Neutral, Up, Down]
-    CROSS_ENTROPY_LOSS_WEIGHTS: List[float] = [1, 1, 1]

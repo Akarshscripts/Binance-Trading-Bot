@@ -41,6 +41,9 @@ class Position(BaseModel):
     # P/L details
     profit: float = 0
     loss: float = 0
+    total_brokerage: float = 0
+    open_brokerage: float = 0
+    close_brokerage: float = 0
 
     # trade age details
     age: int = 0

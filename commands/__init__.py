@@ -1,3 +1,3 @@
-from .predict.main import start_predictions, backtest_predictions
+from .predict.main import start_algorithm, backtest_algorithm
 
-__all__ = ["start_predictions", "backtest_predictions"]
+__all__ = ["start_algorithm", "backtest_algorithm"]

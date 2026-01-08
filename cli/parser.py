@@ -17,7 +17,7 @@ def create_parser() -> ArgumentParser:
     # create a parser
     parser = ArgumentParser(
         prog="stock-predictor",
-        description="Production-grade Neural Network Crypto Predictor",
+        description="Start the AlgoTrader and let it trade!",
         formatter_class=ArgumentDefaultsHelpFormatter,
     )
 

@@ -30,6 +30,9 @@ class PaperTradeStats(BaseModel):
     profit: float
     loss: float
     net: float
+    buy_brokerage: float
+    sell_brokerage: float
+    total_brokerage: float
 
     # age
     avg_trade_age: float
@@ -52,15 +55,16 @@ class PaperTrader:
     This class handles the paper trading logic.
     """
 
-    def __init__(self):
+    def __init__(self, brokerage: float):
         """
         Initialize the paper trader.
         """
 
-        # current position
+        # variables
+        self.brokerage = brokerage
         self.current: Optional[Position] = None
 
-        # closed positions
+        # stats
         self.closed: List[Position] = []
 
     def open_position(
@@ -106,6 +110,9 @@ class PaperTrader:
                 f"Stop loss must be greater than entry price for short positions. Values: entry_price: {entry_price}, stop_loss: {stop_loss}"
             )
 
+        # calculate the brokerage
+        open_brokerage = entry_price * self.brokerage
+
         # create the position
         self.current = Position(
             symbol=symbol,
@@ -115,6 +122,7 @@ class PaperTrader:
             exit_price=round(exit_price, 4),
             stop_loss=round(stop_loss, 4),
             trade_start_timestamp=trade_start_timestamp,
+            open_brokerage=open_brokerage,
         )
 
         # return true
@@ -151,12 +159,14 @@ class PaperTrader:
             # SL
             if low <= pos.stop_loss:
                 pos.loss = pos.entry_price - pos.stop_loss
-                self._close(current_candle_timestamp)
+                close_brokerage = pos.stop_loss * self.brokerage
+                self._close(current_candle_timestamp, close_brokerage)
 
             # Target
             elif high >= pos.exit_price:
                 pos.profit = pos.exit_price - pos.entry_price
-                self._close(current_candle_timestamp)
+                close_brokerage = pos.exit_price * self.brokerage
+                self._close(current_candle_timestamp, close_brokerage)
 
         # SHORT
         else:
@@ -164,23 +174,34 @@ class PaperTrader:
             # SL
             if high >= pos.stop_loss:
                 pos.loss = pos.stop_loss - pos.entry_price
-                self._close(current_candle_timestamp)
+                close_brokerage = pos.stop_loss * self.brokerage
+                self._close(current_candle_timestamp, close_brokerage)
 
             # Target
             elif low <= pos.exit_price:
                 pos.profit = pos.entry_price - pos.exit_price
-                self._close(current_candle_timestamp)
+                close_brokerage = pos.exit_price * self.brokerage
+                self._close(current_candle_timestamp, close_brokerage)
 
-    def _close(self, current_candle_timestamp: Optional[datetime] = None):
+    def _close(
+        self,
+        current_candle_timestamp: Optional[datetime] = None,
+        close_brokerage: float = 0,
+    ):
         """
         Close the current position and move it to closed positions.
 
         Args:
             current_candle_timestamp: The timestamp when the position was closed.
+            close_brokerage: The brokerage to use for closing the position.
         """
 
-        # update the end timestamp
+        # update the position
         self.current.trade_end_time = current_candle_timestamp
+        self.current.close_brokerage = close_brokerage
+        self.current.total_brokerage = (
+            self.current.open_brokerage + self.current.close_brokerage
+        )
 
         # append to closed
         self.closed.append(self.current)
@@ -205,6 +226,9 @@ class PaperTrader:
         total_trade_age = 0
         max_trade_age = 0
         min_trade_age = 0
+        total_brokerage = 0
+        total_buy_brokerage = 0
+        total_sell_brokerage = 0
 
         # iterate over the closed positions
         for pos in self.closed:
@@ -225,11 +249,17 @@ class PaperTrader:
             loss += pos.loss
             max_profit = max(max_profit, pos.profit)
             max_loss = max(max_loss, pos.loss)
+            total_brokerage += pos.total_brokerage
+            total_buy_brokerage += pos.open_brokerage
+            total_sell_brokerage += pos.close_brokerage
 
             # update age variables
             total_trade_age += pos.age
             max_trade_age = max(max_trade_age, pos.age)
             min_trade_age = min(min_trade_age, pos.age)
+
+        # calculate the total brokerage
+        net_profit = profit - loss - total_brokerage
 
         # return the stats
         return PaperTradeStats(
@@ -240,14 +270,17 @@ class PaperTrader:
             trades_lost=total_trades - trades_won,
             profit=round(profit, 4),
             loss=round(loss, 4),
-            net=round(profit - loss, 4),
-            avg_trade_age=round(total_trade_age / total_trades, 4),
+            net=round(net_profit, 4),
+            avg_trade_age=round(total_trade_age / max(1, total_trades), 4),
             max_trade_age=max_trade_age,
             min_trade_age=min_trade_age,
-            success_rate=round(trades_won / total_trades, 4),
-            avg_profit=round(profit / trades_won, 4),
-            avg_loss=round(loss / (total_trades - trades_won), 4),
+            success_rate=round(trades_won / max(1, total_trades), 4),
+            avg_profit=round(profit / max(1, trades_won), 4),
+            avg_loss=round(loss / max(1, total_trades - trades_won), 4),
             max_profit=max_profit,
             max_loss=max_loss,
-            profit_factor=round(profit / loss, 4),
+            profit_factor=round(profit / max(1, loss), 4),
+            buy_brokerage=round(total_buy_brokerage, 4),
+            sell_brokerage=round(total_sell_brokerage, 4),
+            total_brokerage=round(total_brokerage, 4),
         )

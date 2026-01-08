@@ -9,7 +9,7 @@ from typing import List
 import numpy as np
 
 # local imports
-from binance_api.indicators.abstract import Indicator, AvailableIndicators
+from .abstract import Indicator, AvailableIndicators
 
 
 class EMA(Indicator):

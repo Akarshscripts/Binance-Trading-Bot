@@ -59,6 +59,7 @@ class ChartIntervals(Enum):
     Model for supported chart intervals in the Binance API.
     """
 
+    FIVE_MINUTES = ChartIntervalInternal(time_value=5, time_unit="m")
     FIFTEEN_MINUTES = ChartIntervalInternal(time_value=15, time_unit="m")
     THIRTY_MINUTES = ChartIntervalInternal(time_value=30, time_unit="m")
     ONE_HOUR = ChartIntervalInternal(time_value=1, time_unit="h")
