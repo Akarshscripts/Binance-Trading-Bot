@@ -77,6 +77,28 @@ def add_predict_command(subparsers: _SubParsersAction):
         metavar="BROKERAGE",
         help="The brokerage to use for backtesting.",
         required=False,
+        default=0.001,
+        type=float,
+    )
+
+    # add the capital argument
+    predict_parser.add_argument(
+        "-c",
+        "--capital",
+        metavar="CAPITAL",
+        help="The capital to use for backtesting.",
+        required=False,
+        default=10000,
+        type=float,
+    )
+
+    # add the risk_investment argument
+    predict_parser.add_argument(
+        "-ri",
+        "--risk-investment",
+        metavar="RISK_INVESTMENT",
+        help="The risk investment to use for backtesting.",
+        required=False,
         default=0.02,
         type=float,
     )
@@ -127,6 +149,8 @@ def handle_predict(args):
             start_time=args.start_time,
             end_time=args.end_time,
             brokerage=args.brokerage,
+            initial_capital=args.capital,
+            risk_investment=args.risk_investment,
         )
 
     else:

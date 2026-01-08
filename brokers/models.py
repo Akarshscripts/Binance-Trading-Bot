@@ -37,6 +37,8 @@ class Position(BaseModel):
     exit_price: float
     stop_loss: float
     trade_type: TradeType
+    position_size: int
+    risk_reward_ratio: float
 
     # P/L details
     profit: float = 0

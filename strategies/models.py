@@ -32,6 +32,9 @@ class PredictionOutput(BaseModel):
     # action variables
     action: TradeAction = TradeAction.NEUTRAL
 
+    # risk reward ratio
+    risk_reward_ratio: float
+
 
 class CandleData(BaseModel):
     """
@@ -42,3 +45,4 @@ class CandleData(BaseModel):
     high_price: float
     low_price: float
     close_price: float
+    volume: float

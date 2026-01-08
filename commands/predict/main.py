@@ -77,6 +77,7 @@ def start_algorithm(
             high_price=binance_df.iloc[-1]["high"],
             low_price=binance_df.iloc[-1]["low"],
             close_price=binance_df.iloc[-1]["close"],
+            volume=binance_df.iloc[-1]["volume"],
         )
 
         # if the strategy is not neutral, send the message
@@ -97,6 +98,8 @@ def backtest_algorithm(
     start_time: str,
     end_time: str,
     brokerage: float,
+    initial_capital: float,
+    risk_investment: float,
 ):
     """
     Backtest predictions for a given symbol and interval.
@@ -108,12 +111,18 @@ def backtest_algorithm(
         start_time: Start time for backtesting in 'MM/dd/yyyy HH:mm:ss' format.
         end_time: End time for backtesting in 'MM/dd/yyyy HH:mm:ss' format.
         brokerage: The brokerage to use for backtesting.
+        initial_capital: The initial capital to use for backtesting.
+        risk_investment: The risk investment to use for backtesting.
     """
 
     # instances
-    paper_trader = PaperTrader(brokerage=brokerage)
+    paper_trader = PaperTrader(
+        brokerage=brokerage,
+        capital=initial_capital,
+        risk_investment=risk_investment,
+    )
     binance = BinanceApi(timezone=time_zone)
-    trade_strategy = SupertrendStrategy(3, 10, 7, 1.5)
+    trade_strategy = SupertrendStrategy(3, 10, 7, 2)
 
     # convert the start and end time to datetime
     start_time = datetime.strptime(start_time, "%m/%d/%Y %H:%M:%S")
@@ -143,6 +152,7 @@ def backtest_algorithm(
             high_price=binance_df.iloc[idx]["high"],
             low_price=binance_df.iloc[idx]["low"],
             close_price=binance_df.iloc[idx]["close"],
+            volume=binance_df.iloc[idx]["volume"],
         )
 
         # if no action, continue
@@ -160,6 +170,7 @@ def backtest_algorithm(
                 exit_price=predictions.exit_price,
                 stop_loss=predictions.stop_loss,
                 trade_type=TradeType.LONG,
+                risk_reward_ratio=predictions.risk_reward_ratio,
                 trade_start_timestamp=binance_df.iloc[idx]["timestamp"],
             )
 
@@ -174,6 +185,7 @@ def backtest_algorithm(
                 exit_price=predictions.exit_price,
                 stop_loss=predictions.stop_loss,
                 trade_type=TradeType.SHORT,
+                risk_reward_ratio=predictions.risk_reward_ratio,
                 trade_start_timestamp=binance_df.iloc[idx]["timestamp"],
             )
 
@@ -190,7 +202,9 @@ def backtest_algorithm(
     print(f"Success Rate: {stats.success_rate:.2%}")
     print("-" * 50)
     print(f"Total Brokerage: ${stats.total_brokerage:.2f}")
-    print(f"Buy Brokerage: ${stats.buy_brokerage:.2f} | Sell Brokerage: ${stats.sell_brokerage:.2f}")
+    print(
+        f"Buy Brokerage: ${stats.buy_brokerage:.2f} | Sell Brokerage: ${stats.sell_brokerage:.2f}"
+    )
     print("-" * 50)
     print(f"Profit: ${stats.profit:.2f} | Loss: ${stats.loss:.2f}")
     print(f"Net P/L: ${stats.net:.2f}")
@@ -199,5 +213,10 @@ def backtest_algorithm(
     print(f"Avg Profit: ${stats.avg_profit:.2f} | Avg Loss: ${stats.avg_loss:.2f}")
     print(f"Max Profit: ${stats.max_profit:.2f} | Max Loss: ${stats.max_loss:.2f}")
     print("-" * 50)
-    print(f"Trade Duration (candles): Avg: {stats.avg_trade_age:.1f} | Min: {stats.min_trade_age} | Max: {stats.max_trade_age}")
+    print(
+        f"Trade Duration (candles): Avg: {stats.avg_trade_age:.1f} | Min: {stats.min_trade_age} | Max: {stats.max_trade_age}"
+    )
     print("=" * 50)
+    print("\nRisk-Reward Distribution:")
+    for rr_ratio, count in stats.grouped_risk_reawards.items():
+        print(f"  R:R {rr_ratio}: {count} trades")

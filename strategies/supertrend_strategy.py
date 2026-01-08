@@ -6,8 +6,15 @@ This module contains the supertrend strategy for backtesting.
 from collections import deque
 
 # local imports
-from indicators import FractalsIndicator, SuperTrendIndicator
 from strategies.models import PredictionOutput, CandleData, TradeAction
+from indicators import (
+    FractalsIndicator,
+    SuperTrendIndicator,
+    ADX,
+    EMA,
+    BollingerBands,
+    RSI,
+)
 
 
 class SupertrendStrategy:
@@ -21,6 +28,14 @@ class SupertrendStrategy:
         atr_period: int,
         fractal_period: int,
         risk_reward_ratio: float,
+        adx_period: int = 14,
+        adx_smoothing: int = 14,
+        adx_threshold: int = 25,
+        ema_1_period: int = 14,
+        ema_2_period: int = 30,
+        ema_3_period: int = 50,
+        bbands_period: int = 20,
+        rsi_period: int = 14,
     ):
         """
         Initialize the Supertrend strategy.
@@ -35,19 +50,97 @@ class SupertrendStrategy:
         # properties
         self.factor = factor
         self.atr_period = atr_period
+        self.adx_period = adx_period
+        self.adx_smoothing = adx_smoothing
+        self.adx_threshold = adx_threshold
         self.fractal_period = fractal_period
         self.risk_reward_ratio = risk_reward_ratio
 
         # linked instances
         self.fractals_instance = FractalsIndicator(length=fractal_period)
+        self.adx_instance = ADX(di_length=adx_period, adx_smoothing=adx_smoothing)
         self.supertrend_instance = SuperTrendIndicator(
             atr_period=atr_period, multiplier=factor
         )
+        self.rsi = RSI(length=rsi_period)
+        self.ema_1 = EMA(length=ema_1_period)
+        self.ema_2 = EMA(length=ema_2_period)
+        self.ema_3 = EMA(length=ema_3_period)
+        self.bbands = BollingerBands(length=bbands_period)
 
         # candle history
         self.candle_history: deque[CandleData] = deque(
-            maxlen=max(atr_period, fractal_period) * 2
+            maxlen=int(
+                max(
+                    atr_period,
+                    adx_period,
+                    ema_1_period,
+                    ema_2_period,
+                    ema_3_period,
+                    rsi_period,
+                    bbands_period,
+                )
+                * 1.5
+            )
         )
+
+    def get_dynamic_risk_reward_ratio(self) -> float:
+        """
+        Get the dynamic risk reward ratio based on the current market conditions.
+        """
+
+        # return 1.5
+        # ensure we have enough data
+        if len(self.candle_history) < 50:
+            return 1.5  # default for insufficient data
+
+        # get the data for indicators
+        open_price_hist = [i.open_price for i in self.candle_history]
+        close_price_hist = [i.close_price for i in self.candle_history]
+        volume_hist = [i.volume for i in self.candle_history]
+
+        # get values for all the indicators
+        ema_1_vals = self.ema_1.get_value(open_price_hist)
+        ema_2_vals = self.ema_2.get_value(open_price_hist)
+        ema_3_vals = self.ema_3.get_value(open_price_hist)
+        rsi_vals = self.rsi.get_value(close_price_hist)
+        _, middle_band, _ = self.bbands.get_value(open_price_hist, volume_hist)
+
+        # validate we have data
+        if (
+            len(ema_1_vals) == 0
+            or len(ema_2_vals) == 0
+            or len(ema_3_vals) == 0
+            or len(rsi_vals) == 0
+            or len(middle_band) == 0
+        ):
+            return 1.5
+
+        # calculate points
+        points = 0
+
+        # EMA alignment points (2 points for strong trend)
+        if (
+            ema_1_vals[-1] > ema_2_vals[-1] > ema_3_vals[-1]
+            or ema_1_vals[-1] < ema_2_vals[-1] < ema_3_vals[-1]
+        ):
+            points += 2
+
+        # RSI momentum points (2 points for strong momentum)
+        if abs(rsi_vals[-1] - 50) > 10:
+            points += 2
+
+        # Bollinger Bands position points (2 points for trend continuation)
+        if close_price_hist[-1] > middle_band[-1]:
+            points += 2
+
+        # return risk reward ratio based on points
+        if points >= 5:
+            return 2.5  # 1:2.5 for very strong setup
+        elif points >= 3:
+            return 2.0  # 1:2 for good setup
+        else:
+            return 1.5  # 1:1.5 for normal setup
 
     def new_candle(
         self,
@@ -55,6 +148,7 @@ class SupertrendStrategy:
         high_price: float,
         low_price: float,
         close_price: float,
+        volume: float,
         round_off: int = 4,
     ) -> PredictionOutput:
         """
@@ -77,6 +171,7 @@ class SupertrendStrategy:
             high_price = round(float(high_price), round_off)
             low_price = round(float(low_price), round_off)
             close_price = round(float(close_price), round_off)
+            volume = round(float(volume), round_off)
 
         # create the candle data
         curr_candle = CandleData(
@@ -84,12 +179,17 @@ class SupertrendStrategy:
             high_price=high_price,
             low_price=low_price,
             close_price=close_price,
+            volume=volume,
         )
         self.candle_history.append(curr_candle)
 
         # default prediction
         default_prediction = PredictionOutput(
-            entry_price=close_price, exit_price=close_price, stop_loss=close_price
+            entry_price=close_price,
+            exit_price=close_price,
+            stop_loss=close_price,
+            action=TradeAction.NEUTRAL,
+            risk_reward_ratio=self.risk_reward_ratio,
         )
 
         # prepare the history
@@ -102,21 +202,35 @@ class SupertrendStrategy:
             high_price_hist, low_price_hist, close_price_hist
         )
         fractal_data = self.fractals_instance.get_value(high_price_hist, low_price_hist)
+        adx_data, _, _ = self.adx_instance.get_value(
+            high_price_hist, low_price_hist, close_price_hist
+        )
 
         # validate if data is valid
-        if not supertrend_data or not fractal_data:
+        if not supertrend_data or not fractal_data or not adx_data.any():
             return default_prediction
 
         # Convert signal to action
-        if supertrend_data[-1][1] == 1 and supertrend_data[-2][1] == -1:
+        if (
+            supertrend_data[-1][1] == 1
+            and supertrend_data[-2][1] == -1
+            and adx_data[-1] > self.adx_threshold
+        ):
             action = TradeAction.ENTER_LONG
-        elif supertrend_data[-1][1] == -1 and supertrend_data[-2][1] == 1:
+        elif (
+            supertrend_data[-1][1] == -1
+            and supertrend_data[-2][1] == 1
+            and adx_data[-1] > self.adx_threshold
+        ):
             action = TradeAction.ENTER_SHORT
         else:
             action = TradeAction.NEUTRAL
 
         # Calculate stop loss and exit price based on fractals
         if action == TradeAction.ENTER_LONG:
+
+            # get the risk to reward ratio
+            risk_reward_ratio = self.get_dynamic_risk_reward_ratio()
 
             # get the last fractal bottom where the price was above it
             last_fractal_bottom = [i for i in fractal_data[0] if i < close_price]
@@ -129,10 +243,14 @@ class SupertrendStrategy:
 
             # calculate the exit price
             exit_price = close_price + (
-                abs(close_price - curr_stop_loss) * self.risk_reward_ratio
+                abs(close_price - curr_stop_loss) * risk_reward_ratio
             )
 
         elif action == TradeAction.ENTER_SHORT:
+
+            # get the risk to reward ratio
+            risk_reward_ratio = self.get_dynamic_risk_reward_ratio()
+
             # check if the sl is valid
             last_fractal_top = [i for i in fractal_data[0] if i > close_price]
             if not last_fractal_top:
@@ -144,13 +262,14 @@ class SupertrendStrategy:
 
             # calculate the exit price
             exit_price = close_price - (
-                abs(close_price - curr_stop_loss) * self.risk_reward_ratio
+                abs(close_price - curr_stop_loss) * risk_reward_ratio
             )
 
         # default values
         else:
             exit_price = close_price
             curr_stop_loss = close_price
+            risk_reward_ratio = self.risk_reward_ratio
 
         # round the values
         if round_off > 0:
@@ -163,4 +282,5 @@ class SupertrendStrategy:
             entry_price=close_price,
             exit_price=exit_price,
             stop_loss=curr_stop_loss,
+            risk_reward_ratio=risk_reward_ratio,
         )
