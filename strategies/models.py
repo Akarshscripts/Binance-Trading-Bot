@@ -37,7 +37,7 @@ class PredictionOutput(BaseModel):
     risk_reward_ratio: float
 
     # indicator details
-    indicator_details = Optional[Dict[str, Any]] = None
+    indicator_details: Optional[Dict[str, Any]] = None
 
 
 class CandleData(BaseModel):
