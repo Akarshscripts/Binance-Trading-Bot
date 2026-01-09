@@ -109,6 +109,7 @@ def start_algorithm(
             close_price=binance_df.iloc[-1]["close"],
             volume=binance_df.iloc[-1]["volume"],
         )
+        print("Latest candle:", binance_df.iloc[-1]["timestamp"])
 
         # if the strategy is not neutral, send the message
         if predictions.action != TradeAction.NEUTRAL:
