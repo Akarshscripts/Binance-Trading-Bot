@@ -84,12 +84,17 @@ class SupertrendStrategy:
             )
         )
 
-    def get_dynamic_risk_reward_ratio(self) -> float:
+    def get_dynamic_risk_reward_ratio(self, action: TradeAction) -> float:
         """
         Get the dynamic risk reward ratio based on the current market conditions.
+
+        Args:
+            action: The trade action (ENTER_LONG or ENTER_SHORT).
+
+        Returns:
+            The dynamic risk reward ratio.
         """
 
-        # return 1.5
         # ensure we have enough data
         if len(self.candle_history) < 50:
             return 1.5  # default for insufficient data
@@ -114,15 +119,18 @@ class SupertrendStrategy:
             or len(rsi_vals) == 0
             or len(middle_band) == 0
         ):
-            return 1.5
+            return self.risk_reward_ratio
 
         # calculate points
         points = 0
 
         # EMA alignment points (2 points for strong trend)
         if (
-            ema_1_vals[-1] > ema_2_vals[-1] > ema_3_vals[-1]
-            or ema_1_vals[-1] < ema_2_vals[-1] < ema_3_vals[-1]
+            action == TradeAction.ENTER_LONG
+            and ema_1_vals[-1] > ema_2_vals[-1] > ema_3_vals[-1]
+        ) or (
+            action == TradeAction.ENTER_SHORT
+            and ema_1_vals[-1] < ema_2_vals[-1] < ema_3_vals[-1]
         ):
             points += 2
 
@@ -136,11 +144,11 @@ class SupertrendStrategy:
 
         # return risk reward ratio based on points
         if points >= 5:
-            return 2.5  # 1:2.5 for very strong setup
+            return self.risk_reward_ratio * 1.25  # 1.5 times the base R:R
         elif points >= 3:
-            return 2.0  # 1:2 for good setup
+            return self.risk_reward_ratio * 1.125  # 1.25 times the base R:R
         else:
-            return 1.5  # 1:1.5 for normal setup
+            return self.risk_reward_ratio  # for normal setup
 
     def new_candle(
         self,
@@ -230,7 +238,7 @@ class SupertrendStrategy:
         if action == TradeAction.ENTER_LONG:
 
             # get the risk to reward ratio
-            risk_reward_ratio = self.get_dynamic_risk_reward_ratio()
+            risk_reward_ratio = self.get_dynamic_risk_reward_ratio(action)
 
             # get the last fractal bottom where the price was above it
             last_fractal_bottom = [i for i in fractal_data[0] if i < close_price]
@@ -249,7 +257,7 @@ class SupertrendStrategy:
         elif action == TradeAction.ENTER_SHORT:
 
             # get the risk to reward ratio
-            risk_reward_ratio = self.get_dynamic_risk_reward_ratio()
+            risk_reward_ratio = self.get_dynamic_risk_reward_ratio(action)
 
             # check if the sl is valid
             last_fractal_top = [i for i in fractal_data[0] if i > close_price]

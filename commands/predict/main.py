@@ -4,7 +4,9 @@ This module contains the core logic for the predict command.
 
 # 1st party imports
 import time
-from datetime import datetime, timedelta
+import json
+from pathlib import Path
+from datetime import datetime
 
 # 3rd party imports
 from tqdm import tqdm
@@ -37,7 +39,7 @@ def start_algorithm(
     # instances
     binance = BinanceApi(timezone=time_zone)
     discord = Messenger(webhook_url=discord_webhook)
-    trade_strategy = SupertrendStrategy(3, 10, 7, 1.5)
+    trade_strategy = SupertrendStrategy(3, 10, 7, 2)
 
     # send the startup message
     discord.send_text_message(
@@ -47,6 +49,10 @@ def start_algorithm(
     # time variables
     curr_time = None
     last_success_fetched_at = None
+
+    # create a json file to dump trades
+    trades_jsonl = Path("trades.jsonl")
+    trades_jsonl.touch()
 
     # main loop
     while True:
@@ -84,8 +90,12 @@ def start_algorithm(
         if predictions.action != TradeAction.NEUTRAL:
 
             # prepare msg
-            msg = f"Strategy: **{predictions.action}**.\nTime: **{binance_df.iloc[-1]["timestamp"].strftime('%Y-%m-%d %H:%M:%S')}**.\nEntry Price: **{predictions.entry_price:4f}**.\n Stop Loss: **{predictions.stop_loss:4f}**.\n Take Profit: **{predictions.exit_price:4f}**."
+            msg = f"Strategy: **{predictions.action}**.\nTime: **{binance_df.iloc[-1]["timestamp"].strftime('%Y-%m-%d %H:%M:%S')}**.\nEntry Price: **{predictions.entry_price:.4f}**.\n Stop Loss: **{predictions.stop_loss:.4f}**.\n Take Profit: **{predictions.exit_price:.4f}**."
             discord.send_text_message(msg)
+
+            # dump the trade to jsonl
+            with trades_jsonl.open("a") as f:
+                f.write(json.dumps(predictions.model_dump(mode="json")) + "\n")
 
         # update the last success fetched at
         last_success_fetched_at = curr_time
@@ -218,5 +228,7 @@ def backtest_algorithm(
     )
     print("=" * 50)
     print("\nRisk-Reward Distribution:")
-    for rr_ratio, count in stats.grouped_risk_reawards.items():
-        print(f"  R:R {rr_ratio}: {count} trades")
+    for rr_ratio, values in stats.grouped_risk_reawards.items():
+        print(
+            f"  R:R {rr_ratio}: {values.total_trades} trades | Win Rate: {values.win_percent:.2f}%"
+        )

@@ -14,6 +14,16 @@ from .models import Position, TradeType
 from binance_api import BinanceSymbols, ChartIntervals
 
 
+class RiskRewardStats(BaseModel):
+    """
+    This model is used to return the stats of a specific risk reward ratio.
+    """
+
+    total_trades: int
+    trades_won: int
+    win_percent: float
+
+
 class PaperTradeStats(BaseModel):
     """
     This model is used to return the stats of all the trades taken by the PaperTrader
@@ -33,7 +43,7 @@ class PaperTradeStats(BaseModel):
     buy_brokerage: float
     sell_brokerage: float
     total_brokerage: float
-    grouped_risk_reawards: Dict[float, int]
+    grouped_risk_reawards: Dict[float, RiskRewardStats]
 
     # age
     avg_trade_age: float
@@ -66,6 +76,7 @@ class PaperTrader:
         self.brokerage = brokerage
         self.current: Optional[Position] = None
         self.risk_investment = risk_investment
+        self.risk_per_trade = capital * risk_investment
 
         # stats
         self.closed: List[Position] = []
@@ -119,12 +130,11 @@ class PaperTrader:
                 f"Stop loss must be greater than entry price for short positions. Values: entry_price: {entry_price}, stop_loss: {stop_loss}"
             )
 
-        # calculate the position size based on risk
+        # calculate the risk per share
         risk_per_share = abs(entry_price - stop_loss)
-        max_risk_amount = self.capital * self.risk_investment
 
         # calculate position size based on risk (how many shares for this risk amount)
-        risk_based_size = max_risk_amount // risk_per_share
+        risk_based_size = self.risk_per_trade // risk_per_share
 
         # calculate position size based on total capital (how many shares can we afford)
         max_shares_by_capital = self.capital // (entry_price * (1 + self.brokerage))
@@ -145,7 +155,6 @@ class PaperTrader:
                 f"Insufficient capital. Required: ${required_capital:.2f}, Available: ${self.capital:.2f}"
             )
 
-        # create the position
         self.current = Position(
             symbol=symbol,
             interval=interval,
@@ -153,10 +162,10 @@ class PaperTrader:
             entry_price=round(entry_price, 4),
             exit_price=round(exit_price, 4),
             stop_loss=round(stop_loss, 4),
-            trade_start_timestamp=trade_start_timestamp,
+            trade_start_time=trade_start_timestamp,
             open_brokerage=open_brokerage,
             position_size=position_size,
-            risk_reward_ratio=risk_reward_ratio
+            risk_reward_ratio=risk_reward_ratio,
         )
 
         # return true
@@ -264,11 +273,11 @@ class PaperTrader:
         max_profit, max_loss = 0, 0
         total_trade_age = 0
         max_trade_age = 0
-        min_trade_age = 0
+        min_trade_age = float("inf")
         total_brokerage = 0
         total_buy_brokerage = 0
         total_sell_brokerage = 0
-        grouped_risk_reawards = {}
+        grouped_risk_reawards: Dict[float, RiskRewardStats] = {}
 
         # iterate over the closed positions
         for pos in self.closed:
@@ -298,10 +307,22 @@ class PaperTrader:
             max_trade_age = max(max_trade_age, pos.age)
             min_trade_age = min(min_trade_age, pos.age)
 
-            # update grouped_risk_reawards
+            # add risk reward key in the dict if not already
             if pos.risk_reward_ratio not in grouped_risk_reawards:
-                grouped_risk_reawards[pos.risk_reward_ratio] = 0
-            grouped_risk_reawards[pos.risk_reward_ratio] += 1
+                grouped_risk_reawards[pos.risk_reward_ratio] = RiskRewardStats(
+                    total_trades=0,
+                    trades_won=0,
+                    win_percent=0.0,
+                )
+
+            # update stats for R:R
+            curr_rr = grouped_risk_reawards[pos.risk_reward_ratio]
+            if pos.profit > 0:
+                curr_rr.trades_won += 1
+            curr_rr.total_trades += 1
+            curr_rr.win_percent = round(
+                curr_rr.trades_won / curr_rr.total_trades * 100, 2
+            )
 
         # calculate the total brokerage
         net_profit = profit - loss - total_brokerage
@@ -318,7 +339,7 @@ class PaperTrader:
             net=round(net_profit, 4),
             avg_trade_age=round(total_trade_age / max(1, total_trades), 4),
             max_trade_age=max_trade_age,
-            min_trade_age=min_trade_age,
+            min_trade_age=int(min_trade_age) if min_trade_age != float("inf") else 0,
             success_rate=round(trades_won / max(1, total_trades), 4),
             avg_profit=round(profit / max(1, trades_won), 4),
             avg_loss=round(loss / max(1, total_trades - trades_won), 4),
