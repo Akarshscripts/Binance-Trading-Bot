@@ -73,6 +73,32 @@ class ChartIntervals(Enum):
     ONE_WEEK = ChartIntervalInternal(time_value=1, time_unit="w")
     ONE_MONTH = ChartIntervalInternal(time_value=1, time_unit="M")
 
+    def __float__(self) -> float:
+        """Convert the interval to float (seconds)."""
+        return float(self.value.to_seconds())
+
+    def __lt__(self, other: float) -> bool:
+        """Compare less than with float."""
+        return float(self) < other
+
+    def __le__(self, other: float) -> bool:
+        """Compare less than or equal with float."""
+        return float(self) <= other
+
+    def __gt__(self, other: float) -> bool:
+        """Compare greater than with float."""
+        return float(self) > other
+
+    def __ge__(self, other: float) -> bool:
+        """Compare greater than or equal with float."""
+        return float(self) >= other
+
+    def __eq__(self, other: object) -> bool:
+        """Compare equality with float or other objects."""
+        if isinstance(other, (int, float)):
+            return float(self) == float(other)
+        return super().__eq__(other)
+
 
 class BinanceSymbols(Enum):
     """
