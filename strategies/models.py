@@ -4,6 +4,7 @@ This module contains the models for the strategies.
 
 # 1st party imports
 from enum import Enum
+from typing import Dict, Any, Optional
 
 # 3rd party imports
 from pydantic import BaseModel
@@ -34,6 +35,9 @@ class PredictionOutput(BaseModel):
 
     # risk reward ratio
     risk_reward_ratio: float
+
+    # indicator details
+    indicator_details = Optional[Dict[str, Any]] = None
 
 
 class CandleData(BaseModel):

@@ -291,4 +291,9 @@ class SupertrendStrategy:
             exit_price=exit_price,
             stop_loss=curr_stop_loss,
             risk_reward_ratio=risk_reward_ratio,
+            indicator_details={
+                "supertrend_data[-1][1]": supertrend_data[-1],
+                "supertrend_data[-2][1]": supertrend_data[-1],
+                "adx_data[-1]": adx_data[-1],
+            },
         )
