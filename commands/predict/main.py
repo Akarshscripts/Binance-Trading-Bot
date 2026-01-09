@@ -6,7 +6,7 @@ This module contains the core logic for the predict command.
 import time
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # 3rd party imports
 from tqdm import tqdm
@@ -53,6 +53,30 @@ def start_algorithm(
     # create a json file to dump trades
     trades_jsonl = Path("trades.jsonl")
     trades_jsonl.touch()
+
+    # initialize strategy with past month's data
+    discord.send_text_message("Initializing strategy with past month's data...")
+    one_month_ago = datetime.now() - timedelta(days=30)
+    historical_data = binance.get_symbol_info(
+        symbol=symbol,
+        interval=interval,
+        start_time=one_month_ago,
+        end_time=datetime.now(),
+    )
+
+    # feed historical data to strategy for initialization
+    for idx in tqdm(range(len(historical_data)), desc="Initializing indicators"):
+        trade_strategy.new_candle(
+            open_price=historical_data.iloc[idx]["open"],
+            high_price=historical_data.iloc[idx]["high"],
+            low_price=historical_data.iloc[idx]["low"],
+            close_price=historical_data.iloc[idx]["close"],
+            volume=historical_data.iloc[idx]["volume"],
+        )
+
+    discord.send_text_message(
+        "Strategy initialization complete. Starting real-time predictions..."
+    )
 
     # main loop
     while True:
