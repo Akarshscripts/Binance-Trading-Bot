@@ -62,7 +62,7 @@ def start_algorithm(
         if last_success_fetched_at is not None:
 
             # calculate the next fetch time
-            next_fetch_at = last_success_fetched_at + interval.value + lag
+            next_fetch_at = last_success_fetched_at + float(interval) + lag
 
             # sleep for the remaining time
             sleep_for = next_fetch_at - curr_time
