@@ -73,25 +73,25 @@ class ADX(Indicator):
 
     def get_value(
         self,
-        candles_high: List[float] | np.ndarray,
-        candles_low: List[float] | np.ndarray,
-        candles_close: List[float] | np.ndarray,
+        high: List[float] | np.ndarray,
+        low: List[float] | np.ndarray,
+        close: List[float] | np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Calculate ADX, +DI, and -DI values for a series of candle data (vectorized).
 
         Args:
-            candles_high: Array of candle high prices (oldest to newest).
-            candles_low: Array of candle low prices (oldest to newest).
-            candles_close: Array of candle close prices (oldest to newest).
+            high: Array of candle high prices (oldest to newest).
+            low: Array of candle low prices (oldest to newest).
+            close: Array of candle close prices (oldest to newest).
 
         Returns:
             Tuple of (adx_values, plus_di_values, minus_di_values) as np.ndarray.
         """
         # convert to numpy arrays
-        high = np.asarray(candles_high, dtype=np.float64)
-        low = np.asarray(candles_low, dtype=np.float64)
-        close = np.asarray(candles_close, dtype=np.float64)
+        high = np.asarray(high, dtype=np.float64)
+        low = np.asarray(low, dtype=np.float64)
+        close = np.asarray(close, dtype=np.float64)
         n = len(high)
 
         if n < 2:

@@ -7,7 +7,7 @@ from enum import Enum
 from typing import Dict, Any, Optional
 
 # 3rd party imports
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 
 class TradeAction(str, Enum):
@@ -40,13 +40,68 @@ class PredictionOutput(BaseModel):
     indicator_details: Optional[Dict[str, Any]] = None
 
 
-class CandleData(BaseModel):
-    """
-    This class stores a single candle data.
-    """
+class SupertrendStrategyConfig(BaseModel):
+    """This class is used to configure the Supertrend strategy."""
 
-    open_price: float
-    high_price: float
-    low_price: float
-    close_price: float
-    volume: float
+    # supertrend params
+    factor: int = Field(
+        ..., ge=1, le=500, description="The multiplier for ATR to calculate supertrend."
+    )
+    atr_period: int = Field(
+        ..., ge=1, le=500, description="The period for ATR calculation in supertrend."
+    )
+
+    # fractal params
+    fractal_period: int = Field(
+        ..., ge=1, le=500, description="The period for fractal calculation."
+    )
+
+    # risk reward params
+    risk_reward_ratio: float = Field(
+        ..., ge=1, le=10, description="The risk reward ratio for the strategy."
+    )
+
+    # adx params
+    adx_period: int = Field(
+        14, ge=1, le=500, description="The period for ADX calculation."
+    )
+    adx_smoothing: int = Field(
+        14, ge=1, le=500, description="The smoothing for ADX calculation."
+    )
+    adx_threshold: int = Field(
+        25, ge=1, le=500, description="The threshold for ADX calculation."
+    )
+
+    # ema params
+    ema_1_period: int = Field(
+        14, ge=1, le=500, description="The period for EMA 1 calculation."
+    )
+    ema_2_period: int = Field(
+        30, ge=1, le=500, description="The period for EMA 2 calculation."
+    )
+    ema_3_period: int = Field(
+        50, ge=1, le=500, description="The period for EMA 3 calculation."
+    )
+
+    # bollinger bands params
+    bbands_period: int = Field(
+        20, ge=1, le=500, description="The period for Bollinger Bands calculation."
+    )
+
+    # rsi params
+    rsi_period: int = Field(
+        14, ge=1, le=500, description="The period for RSI calculation."
+    )
+
+    # internal config
+    minimum_history: int = Field(
+        500,
+        ge=1,
+        description="The minimum candle history length for the strategy.",
+    )
+
+    @field_validator("minimum_history", mode="after")
+    @classmethod
+    def minimize_history(cls, value: int):
+        """minimize the history required."""
+        return min(value, 500)

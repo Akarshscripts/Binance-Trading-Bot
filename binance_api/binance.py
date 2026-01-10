@@ -48,7 +48,7 @@ class BinanceApi:
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
             self.logger.setLevel(logging.INFO)
-            self.logger.info("Logger configured for %s", __name__)
+            self.logger.info("Logger configured at %s", __name__)
 
     def get_symbol_info(
         self,

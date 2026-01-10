@@ -5,6 +5,8 @@ It contains models for supported symbols, pydantic models for API responses, and
 
 # 1st party imports
 from enum import Enum
+from typing import Literal
+from datetime import datetime, timedelta
 
 # 3rd party imports
 from pydantic import BaseModel
@@ -16,7 +18,7 @@ class ChartIntervalInternal(BaseModel):
     """
 
     time_value: int
-    time_unit: str
+    time_unit: Literal["m", "h", "d", "M"]
 
     def __str__(self) -> str:
         """
@@ -70,8 +72,66 @@ class ChartIntervals(Enum):
     TWELVE_HOURS = ChartIntervalInternal(time_value=12, time_unit="h")
     ONE_DAY = ChartIntervalInternal(time_value=1, time_unit="d")
     THREE_DAYS = ChartIntervalInternal(time_value=3, time_unit="d")
-    ONE_WEEK = ChartIntervalInternal(time_value=1, time_unit="w")
     ONE_MONTH = ChartIntervalInternal(time_value=1, time_unit="M")
+
+    def get_next_fetch_time(self, lag: int = 30) -> int:
+        """
+        Get the next fetch time based on the last completely closed candle.
+
+        Args:
+            lag: Seconds to wait after the candle closes before fetching (max: 30)
+
+        Returns:
+            int: Unix timestamp of when to fetch the next candle
+        """
+        now = datetime.now()
+        interval = self.value
+        lag = max(lag, 30)
+
+        # Find the last completely closed candle based on interval
+        if interval.time_unit == "m":
+
+            # For minute intervals, find the last minute divisible by the interval value
+            last_closed_minute = (
+                now.minute // interval.time_value
+            ) * interval.time_value
+            last_closed_candle = now.replace(
+                minute=last_closed_minute, second=0, microsecond=0
+            )
+
+        elif interval.time_unit == "h":
+
+            # For hour intervals, find the last hour divisible by the interval value
+            last_closed_hour = (now.hour // interval.time_value) * interval.time_value
+            last_closed_candle = now.replace(
+                hour=last_closed_hour, minute=0, second=0, microsecond=0
+            )
+
+        elif interval.time_unit == "d":
+            # For day intervals, find the start of the current day
+            last_closed_candle = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            # For multi-day intervals, go back to the last divisible day
+            if interval.time_value > 1:
+                days_back = (now.day - 1) % interval.time_value
+                last_closed_candle -= timedelta(days=days_back)
+
+        elif interval.time_unit == "M":
+            # For month intervals, find the first day of the current month
+            last_closed_candle = now.replace(
+                day=1, hour=0, minute=0, second=0, microsecond=0
+            )
+
+        else:
+            raise NotImplementedError(
+                f"Interval unit {interval.time_unit} is not supported"
+            )
+
+        # prepare next fetch time
+        next_fetch_time = last_closed_candle + timedelta(
+            seconds=interval.to_seconds() + lag
+        )
+
+        return int(next_fetch_time.timestamp())
 
     def __float__(self) -> float:
         """Convert the interval to float (seconds)."""

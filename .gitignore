@@ -14,3 +14,5 @@ wandb/
 *.csv
 .ipynb_checkpoints/
 *.pth
+*.jsonl
+*.json

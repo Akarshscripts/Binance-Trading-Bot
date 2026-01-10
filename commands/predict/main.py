@@ -5,17 +5,22 @@ This module contains the core logic for the predict command.
 # 1st party imports
 import time
 import json
+import logging
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # 3rd party imports
 from tqdm import tqdm
+from pandas import DataFrame
 
 # local imports
 from messenger import Messenger
 from brokers import PaperTrader, TradeType
-from strategies import SupertrendStrategy, TradeAction
 from binance_api import BinanceSymbols, ChartIntervals, BinanceApi, TimeZones
+from strategies import SupertrendStrategy, TradeAction, SupertrendStrategyConfig
+
+# get logger
+logger = logging.getLogger("predict")
 
 
 def start_algorithm(
@@ -36,80 +41,67 @@ def start_algorithm(
         lag: Seconds to wait after interval ends before fetching (default: 30).
     """
 
+    # create config
+    strategy_config = SupertrendStrategyConfig(
+        factor=3,
+        atr_period=10,
+        fractal_period=7,
+        risk_reward_ratio=2,
+    )
+
     # instances
     binance = BinanceApi(timezone=time_zone)
     discord = Messenger(webhook_url=discord_webhook)
-    trade_strategy = SupertrendStrategy(3, 10, 7, 2)
-
-    # send the startup message
-    discord.send_text_message(
-        f"Starting predictions for {symbol.value} on {interval.value} interval."
-    )
+    trade_strategy = SupertrendStrategy(config=strategy_config)
 
     # time variables
     curr_time = None
-    last_success_fetched_at = None
+    next_fetch_at = interval.get_next_fetch_time(lag=lag)
 
     # create a json file to dump trades
     trades_jsonl = Path("trades.jsonl")
     trades_jsonl.touch()
 
-    # initialize strategy with past month's data
-    discord.send_text_message("Initializing strategy with past month's data...")
-    one_month_ago = datetime.now() - timedelta(days=30)
-    historical_data = binance.get_symbol_info(
-        symbol=symbol,
-        interval=interval,
-        start_time=one_month_ago,
-        end_time=datetime.now(),
-    )
-
-    # feed historical data to strategy for initialization
-    for idx in tqdm(range(len(historical_data)), desc="Initializing indicators"):
-        trade_strategy.new_candle(
-            open_price=historical_data.iloc[idx]["open"],
-            high_price=historical_data.iloc[idx]["high"],
-            low_price=historical_data.iloc[idx]["low"],
-            close_price=historical_data.iloc[idx]["close"],
-            volume=historical_data.iloc[idx]["volume"],
-        )
-
-    discord.send_text_message(
-        "Strategy initialization complete. Starting real-time predictions..."
-    )
+    # send the startup message
+    startup_msg = f"Starting predictions for {symbol.value} on {interval.value} interval. Next fetch at: {datetime.fromtimestamp(next_fetch_at).strftime('%Y-%m-%d %H:%M:%S')}."
+    logger.info(startup_msg)
+    discord.send_text_message(startup_msg)
 
     # main loop
     while True:
 
         # check if it is time to fetch
         curr_time = time.time()
-        if last_success_fetched_at is not None:
-
-            # calculate the next fetch time
-            next_fetch_at = last_success_fetched_at + float(interval) + lag
-
-            # sleep for the remaining time
-            sleep_for = next_fetch_at - curr_time
-
-            # sleep if needed
-            if sleep_for > 0:
-                time.sleep(sleep_for)
+        sleep_for = next_fetch_at - curr_time
+        if sleep_for > 0:
+            time.sleep(sleep_for)
 
         # fetch the data
+        logger.info(
+            f"Fetching data for {symbol.value} on {interval.value} interval. Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
         binance_df = binance.get_symbol_info(
             symbol=symbol,
             interval=interval,
         )
 
+        # calculate the next fetch time
+        next_fetch_at = interval.get_next_fetch_time(lag=lag)
+
+        # remove the last row as it is not completed yet
+        binance_df: DataFrame = binance_df.drop(binance_df.index[-1])
+
         # make predictions
-        predictions = trade_strategy.new_candle(
-            open_price=binance_df.iloc[-1]["open"],
-            high_price=binance_df.iloc[-1]["high"],
-            low_price=binance_df.iloc[-1]["low"],
-            close_price=binance_df.iloc[-1]["close"],
-            volume=binance_df.iloc[-1]["volume"],
+        predictions = trade_strategy.process_candles(
+            open_prices=binance_df["open"],
+            high_prices=binance_df["high"],
+            low_prices=binance_df["low"],
+            close_prices=binance_df["close"],
+            volumes=binance_df["volume"],
         )
-        print("Latest candle:", binance_df.iloc[-1]["timestamp"])
+        logger.info(
+            f"Latest candle: {binance_df.iloc[-1]['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}. Latest Candle Close: {binance_df.iloc[-1]['close']:.4f}"
+        )
 
         # if the strategy is not neutral, send the message
         if predictions.action != TradeAction.NEUTRAL:
@@ -117,13 +109,15 @@ def start_algorithm(
             # prepare msg
             msg = f"Strategy: **{predictions.action}**.\nTime: **{binance_df.iloc[-1]["timestamp"].strftime('%Y-%m-%d %H:%M:%S')}**.\nEntry Price: **{predictions.entry_price:.4f}**.\n Stop Loss: **{predictions.stop_loss:.4f}**.\n Take Profit: **{predictions.exit_price:.4f}**."
             discord.send_text_message(msg)
+            logger.info(msg)
 
             # dump the trade to jsonl
             with trades_jsonl.open("a") as f:
                 f.write(json.dumps(predictions.model_dump(mode="json")) + "\n")
 
-        # update the last success fetched at
-        last_success_fetched_at = curr_time
+        # print cycle complete message
+        cycle_complete_msg = "-" * 20 + " Cycle Complete " + "-" * 20
+        logger.info(cycle_complete_msg)
 
 
 def backtest_algorithm(
@@ -150,6 +144,14 @@ def backtest_algorithm(
         risk_investment: The risk investment to use for backtesting.
     """
 
+    # create config
+    strategy_config = SupertrendStrategyConfig(
+        factor=3,
+        atr_period=10,
+        fractal_period=7,
+        risk_reward_ratio=2,
+    )
+
     # instances
     paper_trader = PaperTrader(
         brokerage=brokerage,
@@ -157,22 +159,45 @@ def backtest_algorithm(
         risk_investment=risk_investment,
     )
     binance = BinanceApi(timezone=time_zone)
-    trade_strategy = SupertrendStrategy(3, 10, 7, 2)
+    trade_strategy = SupertrendStrategy(config=strategy_config)
 
     # convert the start and end time to datetime
     start_time = datetime.strptime(start_time, "%m/%d/%Y %H:%M:%S")
     end_time = datetime.strptime(end_time, "%m/%d/%Y %H:%M:%S")
 
     # fetch the data from start to end
+    logger.info(
+        f"Fetching backtest data for {symbol.value} from {start_time} to {end_time}"
+    )
     binance_df = binance.get_symbol_info(
         symbol=symbol,
         interval=interval,
         start_time=start_time,
         end_time=end_time,
     )
+    logger.info(f"Fetched {len(binance_df)} candles for backtesting")
+
+    # check if enough data is available
+    if len(binance_df) < strategy_config.minimum_history:
+        raise ValueError(
+            f"Not enough data available for backtesting. Need at least {strategy_config.minimum_history} candles, got {len(binance_df)}"
+        )
 
     # main loop
-    for idx in tqdm(range(len(binance_df))):
+    n = len(binance_df)
+    for idx in tqdm(range(strategy_config.minimum_history, n), desc="Backtesting progress"):
+
+        # get the data up to current candle (excluding incomplete current candle)
+        current_df = binance_df.iloc[: idx + 1].copy()
+
+        # make predictions using process_candles
+        predictions = trade_strategy.process_candles(
+            open_prices=current_df["open"],
+            high_prices=current_df["high"],
+            low_prices=current_df["low"],
+            close_prices=current_df["close"],
+            volumes=current_df["volume"],
+        )
 
         # pass the new candle info to paper trader
         paper_trader.update(
@@ -181,18 +206,15 @@ def backtest_algorithm(
             current_candle_timestamp=binance_df.iloc[idx]["timestamp"],
         )
 
-        # make predictions
-        predictions = trade_strategy.new_candle(
-            open_price=binance_df.iloc[idx]["open"],
-            high_price=binance_df.iloc[idx]["high"],
-            low_price=binance_df.iloc[idx]["low"],
-            close_price=binance_df.iloc[idx]["close"],
-            volume=binance_df.iloc[idx]["volume"],
-        )
-
         # if no action, continue
         if predictions.action == TradeAction.NEUTRAL:
             continue
+
+        # log the trade signal
+        logger.info(
+            f"Backtest {predictions.action} signal at {binance_df.iloc[idx]['timestamp'].strftime('%Y-%m-%d %H:%M:%S')} - "
+            f"Entry: {predictions.entry_price:.4f}, SL: {predictions.stop_loss:.4f}, TP: {predictions.exit_price:.4f}"
+        )
 
         # if buy action
         if predictions.action == TradeAction.ENTER_LONG:
