@@ -5,6 +5,7 @@ This module contains the core logic for the predict command.
 # 1st party imports
 import time
 import json
+import pytz
 import logging
 from pathlib import Path
 from datetime import datetime
@@ -57,13 +58,14 @@ def start_algorithm(
     # time variables
     curr_time = None
     next_fetch_at = interval.get_next_fetch_time(lag=lag)
+    local_next_fetch_at = datetime.fromtimestamp(next_fetch_at, tz=pytz.timezone(time_zone.value.iana_name))
 
     # create a json file to dump trades
     trades_jsonl = Path("trades.jsonl")
     trades_jsonl.touch()
 
     # send the startup message
-    startup_msg = f"Starting predictions for {symbol.value} on {interval.value} interval. Next fetch at: {datetime.fromtimestamp(next_fetch_at).strftime('%Y-%m-%d %H:%M:%S')}."
+    startup_msg = f"Starting predictions for {symbol.value} on {interval.value} interval. Next fetch at: {local_next_fetch_at.strftime('%Y-%m-%d %H:%M:%S')}."
     logger.info(startup_msg)
     discord.send_text_message(startup_msg)
 
@@ -71,14 +73,14 @@ def start_algorithm(
     while True:
 
         # check if it is time to fetch
-        curr_time = time.time()
+        curr_time = time.time()  # UTC timestamp
         sleep_for = next_fetch_at - curr_time
         if sleep_for > 0:
             time.sleep(sleep_for)
 
         # fetch the data
         logger.info(
-            f"Fetching data for {symbol.value} on {interval.value} interval. Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            f"Fetching data for {symbol.value} on {interval.value} interval. Time: {datetime.fromtimestamp(curr_time, tz=pytz.timezone(time_zone.value.iana_name)).strftime('%Y-%m-%d %H:%M:%S')}"
         )
         binance_df = binance.get_symbol_info(
             symbol=symbol,
@@ -87,6 +89,7 @@ def start_algorithm(
 
         # calculate the next fetch time
         next_fetch_at = interval.get_next_fetch_time(lag=lag)
+        local_next_fetch_at = datetime.fromtimestamp(next_fetch_at, tz=pytz.timezone(time_zone.value.iana_name))
 
         # remove the last row as it is not completed yet
         binance_df: DataFrame = binance_df.drop(binance_df.index[-1])
