@@ -6,6 +6,7 @@ which is then passed to the model for inference. The results are posted to the l
 """
 
 # 1st party imports
+import os
 import logging
 
 # import locals
@@ -17,10 +18,15 @@ def setup_logging(level=logging.INFO):
     Setup logging for the application.
     """
 
+    # create logs directory if it doesn't exist
+    os.makedirs("logs", exist_ok=True)
+
     logging.basicConfig(
         level=level,
         format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
+        filename="logs/app.log",
+        filemode="w",
     )
 
 
