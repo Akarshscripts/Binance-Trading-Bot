@@ -20,6 +20,8 @@ class ChartIntervalInternal(BaseModel):
     time_value: int
     time_unit: Literal["m", "h", "d", "M"]
 
+    model_config = {"frozen": True}
+
     def __str__(self) -> str:
         """
         Returns the string representation of the interval.
@@ -158,6 +160,20 @@ class ChartIntervals(Enum):
         if isinstance(other, (int, float)):
             return float(self) == float(other)
         return super().__eq__(other)
+
+    def __str__(self) -> str:
+        """Return the string representation of the interval."""
+        return f"{self.value.time_value}{self.value.time_unit}"
+
+    @classmethod
+    def _missing_(cls, value):
+        """Handle missing values for the enum."""
+        if isinstance(value, str):
+            value = value.lower()
+            for member in cls:
+                if member.value == value:
+                    return member
+        return None
 
 
 class BinanceSymbols(Enum):

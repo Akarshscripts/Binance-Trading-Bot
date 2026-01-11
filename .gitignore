@@ -16,3 +16,5 @@ wandb/
 *.pth
 *.jsonl
 *.json
+logs/
+*.log

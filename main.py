@@ -6,11 +6,11 @@ which is then passed to the model for inference. The results are posted to the l
 """
 
 # 1st party imports
-import os
 import logging
+from pathlib import Path
 
 # import locals
-from cli import create_parser
+from cli import app
 
 
 def setup_logging(level=logging.INFO):
@@ -19,15 +19,33 @@ def setup_logging(level=logging.INFO):
     """
 
     # create logs directory if it doesn't exist
-    os.makedirs("logs", exist_ok=True)
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
 
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+    # log format
+    formatter = logging.Formatter(
+        "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
-        filename="logs/app.log",
-        filemode="w",
     )
+
+    # create a stream handler
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(level)
+    stream_handler.setFormatter(formatter)
+
+    # create a file handler
+    file_handler = logging.FileHandler(log_dir / "app.log", mode="w")
+    file_handler.setLevel(level)
+    file_handler.setFormatter(formatter)
+
+    # setup root logger
+    root = logging.getLogger()
+    root.setLevel(level)
+    root.handlers.clear()
+
+    # add handlers
+    root.addHandler(stream_handler)
+    root.addHandler(file_handler)
 
 
 def main():
@@ -38,12 +56,8 @@ def main():
     # setup logging
     setup_logging()
 
-    # parse args
-    parser = create_parser()
-    args = parser.parse_args()
-
-    # call the handler attached to the command
-    args.handler(args)
+    # run the app
+    app()
 
 
 if __name__ == "__main__":

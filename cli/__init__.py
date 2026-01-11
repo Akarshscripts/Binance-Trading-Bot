@@ -1,3 +1,6 @@
-from .parser import create_parser
+from .app import app
+from .predict import predict_app
 
-__all__ = ["create_parser"]
+app.add_typer(predict_app)
+
+__all__ = ["app"]

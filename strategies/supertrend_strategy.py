@@ -21,6 +21,7 @@ from indicators import (
     RSI,
 )
 
+
 class SupertrendStrategy:
     """
     Supertrend strategy that combines Supertrend indicator with fractal-based stop losses.
@@ -261,20 +262,14 @@ class SupertrendStrategy:
                 and supertrend_data[-2][1] == -1
                 and adx_data[-1] > self.config.adx_threshold
             ):
-                log_msg = f"Long signal generated. last supertrend value: {supertrend_data[-1][1]}, second last supertrend value: {supertrend_data[-2][1]}, last adx value: {adx_data[-1]}"
-                self.logger.info(log_msg)
                 action = TradeAction.ENTER_LONG
             elif (
                 supertrend_data[-1][1] == -1
                 and supertrend_data[-2][1] == 1
                 and adx_data[-1] > self.config.adx_threshold
             ):
-                log_msg = f"Short signal generated. last supertrend value: {supertrend_data[-1][1]}, second last supertrend value: {supertrend_data[-2][1]}, last adx value: {adx_data[-1]}"
-                self.logger.info(log_msg)
                 action = TradeAction.ENTER_SHORT
             else:
-                log_msg = f"Neutral signal generated. last supertrend value: {supertrend_data[-1][1]}, second last supertrend value: {supertrend_data[-2][1]}, last adx value: {adx_data[-1]}"
-                self.logger.info(log_msg)
                 action = TradeAction.NEUTRAL
 
             # Calculate stop loss and exit price based on fractals

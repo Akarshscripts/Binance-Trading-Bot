@@ -58,7 +58,9 @@ def start_algorithm(
     # time variables
     curr_time = None
     next_fetch_at = interval.get_next_fetch_time(lag=lag)
-    local_next_fetch_at = datetime.fromtimestamp(next_fetch_at, tz=pytz.timezone(time_zone.value.iana_name))
+    local_next_fetch_at = datetime.fromtimestamp(
+        next_fetch_at, tz=pytz.timezone(time_zone.value.iana_name)
+    )
 
     # create a json file to dump trades
     trades_jsonl = Path("trades.jsonl")
@@ -89,7 +91,9 @@ def start_algorithm(
 
         # calculate the next fetch time
         next_fetch_at = interval.get_next_fetch_time(lag=lag)
-        local_next_fetch_at = datetime.fromtimestamp(next_fetch_at, tz=pytz.timezone(time_zone.value.iana_name))
+        local_next_fetch_at = datetime.fromtimestamp(
+            next_fetch_at, tz=pytz.timezone(time_zone.value.iana_name)
+        )
 
         # remove the last row as it is not completed yet
         binance_df: DataFrame = binance_df.drop(binance_df.index[-1])
@@ -132,6 +136,7 @@ def backtest_algorithm(
     brokerage: float,
     initial_capital: float,
     risk_investment: float,
+    approval: bool,
 ):
     """
     Backtest predictions for a given symbol and interval.
@@ -145,6 +150,7 @@ def backtest_algorithm(
         brokerage: The brokerage to use for backtesting.
         initial_capital: The initial capital to use for backtesting.
         risk_investment: The risk investment to use for backtesting.
+        approval: Ask user for approval before each trade in backtesting.
     """
 
     # create config
@@ -188,7 +194,11 @@ def backtest_algorithm(
 
     # main loop
     n = len(binance_df)
-    for idx in tqdm(range(strategy_config.minimum_history, n), desc="Backtesting progress"):
+    for idx in tqdm(
+        range(strategy_config.minimum_history, n),
+        desc="Backtesting progress",
+        disable=approval,
+    ):
 
         # get the data up to current candle (excluding incomplete current candle)
         current_df = binance_df.iloc[: idx + 1].copy()
@@ -213,11 +223,21 @@ def backtest_algorithm(
         if predictions.action == TradeAction.NEUTRAL:
             continue
 
-        # log the trade signal
-        logger.info(
-            f"Backtest {predictions.action} signal at {binance_df.iloc[idx]['timestamp'].strftime('%Y-%m-%d %H:%M:%S')} - "
-            f"Entry: {predictions.entry_price:.4f}, SL: {predictions.stop_loss:.4f}, TP: {predictions.exit_price:.4f}"
-        )
+        # ask for approval
+        if approval:
+
+            # log the trade signal
+            logger.info(
+                f"Backtest {predictions.action} signal at {binance_df.iloc[idx]['timestamp'].strftime('%Y-%m-%d %H:%M:%S')} - "
+                f"Entry: {predictions.entry_price:.4f}, SL: {predictions.stop_loss:.4f}, TP: {predictions.exit_price:.4f}"
+            )
+
+            # ask for approval
+            approval_msg = input("Approve this trade? (y/n): ")
+            while approval_msg.lower() not in ["y", "n"]:
+                approval_msg = input("Approve this trade? (y/n): ")
+            if approval_msg.lower() == "n":
+                continue
 
         # if buy action
         if predictions.action == TradeAction.ENTER_LONG:

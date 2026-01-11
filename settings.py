@@ -33,9 +33,32 @@ class Constants:
     COL_LAGS: List[int] = [1, 3, 5, 10, 15, 20]
     TRAIN_RATIO: float = 0.8
     ATR_COL_NAME: str = "atr_2"
-    COLS_TO_DROP = ["timestamp", "close_time", "taker_buy_base_volume", "taker_buy_quote_volume", "number_of_trades", "quote_asset_volume"]
-    SCALABLE_COLS: List[str] = ["open", "high", "low", "close", "volume", "bollinger_bands_0_diff", "vwap_1", "atr_2", "rsi_3_centered_diff"]
-    COLS_TO_STACK: List[str] = ["volume", "bollinger_bands_0_diff", "vwap_1", "atr_2", "rsi_3_centered_diff"]
+    COLS_TO_DROP = [
+        "timestamp",
+        "close_time",
+        "taker_buy_base_volume",
+        "taker_buy_quote_volume",
+        "number_of_trades",
+        "quote_asset_volume",
+    ]
+    SCALABLE_COLS: List[str] = [
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "bollinger_bands_0_diff",
+        "vwap_1",
+        "atr_2",
+        "rsi_3_centered_diff",
+    ]
+    COLS_TO_STACK: List[str] = [
+        "volume",
+        "bollinger_bands_0_diff",
+        "vwap_1",
+        "atr_2",
+        "rsi_3_centered_diff",
+    ]
     R_MULTIPLE_REWARD: float = 1.75
     MAX_ALLOWED_TRADE_LENGTH: int = 36
     TARGET_COL: List[str] = ["r_multiple"]
