@@ -35,6 +35,8 @@ def predict(
     ),
     discord: str = typer.Option(
         None,
+        "-d",
+        "--discord",
         help="Discord webhook URL",
         metavar="Discord URL",
         rich_help_panel=CommandGroups.NOTIFICATION,
