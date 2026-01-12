@@ -69,7 +69,7 @@ class SupertrendStrategyConfig(BaseModel):
         14, ge=1, le=500, description="The smoothing for ADX calculation."
     )
     adx_threshold: int = Field(
-        25, ge=1, le=500, description="The threshold for ADX calculation."
+        20, ge=1, le=500, description="The threshold for ADX calculation."
     )
 
     # ema params

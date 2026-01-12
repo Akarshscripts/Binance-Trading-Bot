@@ -4,7 +4,7 @@ This module contains the supertrend strategy for backtesting.
 
 # 1st party imports
 import logging
-from typing import List
+from typing import List, Optional
 from collections import deque
 
 # 3rd party imports
@@ -64,7 +64,7 @@ class SupertrendStrategy:
         self.close_price_history: deque[float] = deque(maxlen=config.minimum_history)
         self.volume_history: deque[float] = deque(maxlen=config.minimum_history)
 
-    def get_dynamic_risk_reward_ratio(self, action: TradeAction) -> float:
+    def get_dynamic_risk_reward_ratio(self, action: TradeAction) -> Optional[float]:
         """
         Get the dynamic risk reward ratio based on the current market conditions.
 
@@ -92,36 +92,46 @@ class SupertrendStrategy:
             or len(rsi_vals) == 0
             or len(middle_band) == 0
         ):
-            return self.config.risk_reward_ratio
+            return None
 
         # calculate points
         points = 0
 
-        # EMA alignment points (2 points for strong trend)
-        if (
-            action == TradeAction.ENTER_LONG
-            and ema_1_vals[-1] > ema_2_vals[-1] > ema_3_vals[-1]
-        ) or (
-            action == TradeAction.ENTER_SHORT
-            and ema_1_vals[-1] < ema_2_vals[-1] < ema_3_vals[-1]
-        ):
-            points += 2
+        # EMA alignment points (+2 for trend, -1 for opposite)
+        ema_short_signal = ema_1_vals[-1] < ema_2_vals[-1] < ema_3_vals[-1]
+        ema_long_signal = ema_1_vals[-1] > ema_2_vals[-1] > ema_3_vals[-1]
+        if ema_long_signal:
+            if action == TradeAction.ENTER_LONG:
+                points += 2
+            else:
+                points -= 1
+        elif ema_short_signal:
+            if action == TradeAction.ENTER_SHORT:
+                points += 2
+            else:
+                points -= 1
 
-        # RSI momentum points (2 points for strong momentum)
+        # RSI momentum points (+2 for strong momentum)
         if abs(rsi_vals[-1] - 50) > 10:
             points += 2
+        else:
+            points -= 1
 
-        # Bollinger Bands position points (2 points for trend continuation)
+        # Bollinger Bands position points (+2 for trend continuation)
         if self.close_price_history[-1] > middle_band[-1]:
             points += 2
+        else:
+            points -= 1
 
         # return risk reward ratio based on points
         if points >= 5:
             return self.config.risk_reward_ratio * 1.25  # 1.5 times the base R:R
         elif points >= 3:
             return self.config.risk_reward_ratio * 1.125  # 1.25 times the base R:R
-        else:
+        elif points > 0:
             return self.config.risk_reward_ratio  # for normal setup
+        else:
+            return None
 
     def populate_candle_history(
         self,
@@ -281,7 +291,7 @@ class SupertrendStrategy:
 
                 # get the last fractal bottom where the price was above it
                 last_fractal_bottom = [i for i in fractal_data[0] if i < last_close]
-                if not last_fractal_bottom:
+                if not last_fractal_bottom or risk_reward_ratio is None:
                     return default_prediction
 
                 # clip the SL so that it is maximum 2% away
@@ -300,7 +310,7 @@ class SupertrendStrategy:
 
                 # check if the sl is valid
                 last_fractal_top = [i for i in fractal_data[0] if i > last_close]
-                if not last_fractal_top:
+                if not last_fractal_top or risk_reward_ratio is None:
                     return default_prediction
 
                 # clip the SL so that it is maximum 2% away
