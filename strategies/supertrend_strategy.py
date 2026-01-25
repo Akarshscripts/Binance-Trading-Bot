@@ -75,6 +75,9 @@ class SupertrendStrategy:
             The dynamic risk reward ratio.
         """
 
+        if not self.config.allow_dynamic_risk_reward:
+            return self.config.risk_reward_ratio
+
         # get values for all the indicators
         ema_1_vals = self.ema_1.get_value(self.open_price_history)
         ema_2_vals = self.ema_2.get_value(self.open_price_history)

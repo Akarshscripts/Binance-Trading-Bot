@@ -3,8 +3,8 @@ messenger.main
 ----------------
 This module defines the main class which is used to create the messenger.
 
-VERSION = "0.1.0"
-LAST_UPDATED = "2025-09-23"
+VERSION = "0.1.1"
+LAST_UPDATED = "2026-01-25"
 AUTHOR = "Prithvi Srivastava"
 LICENSE = "MIT"
 
@@ -16,19 +16,18 @@ Messenger:
 """
 
 # 1st party imports
-import re
 import inspect
+import logging
 from typing import Dict, Any, Optional, List
 
 # 3rd party imports
 import requests
 
 # local imports
-from .log_config import get_logger
 from .exception_handler import stop_all_exceptions
 
 # create a logger
-LOGGER = get_logger("Messenger")
+LOGGER = logging.getLogger("Messenger")
 
 
 class Messenger:

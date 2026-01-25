@@ -2,92 +2,51 @@
 This module contains the argument parser for the predict command.
 """
 
-# 1st party imports
-from enum import Enum
-from datetime import datetime
-
 # 3rd party imports
 import typer
 
 # local imports
-from binance_api import BinanceSymbols, ChartIntervals, TimeZones
+from cli.models import PairRegistry
 
+# create the registry and register the pairs
+registry = PairRegistry()
+
+# help text
+available_pairs = []
+for pair in registry._registry.keys():
+    available_pairs.extend(list(pair.__members__.keys()))
+
+help_text = f"""
+[bold cyan]Run backtesting for a trading pair.[/bold cyan]
+This command runs historical backtesting with paper trading simulation.
+
+[bold]Available Pairs:[/bold]
+{"|".join(f" [bright_green]• {p}[/bright_green] |" for p in available_pairs)}
+"""
 
 # create the predict app cli
-predict_app = typer.Typer(help="Run price predictions")
+predict_app = typer.Typer()
 
 
-class CommandGroups(str, Enum):
-    """Enum for command groups."""
-
-    REAL_TIME = "Real-time predictions"
-    BACKTEST = "Backtesting"
-    NOTIFICATION = "Notification"
-
-
-@predict_app.command("predict")
+@predict_app.command(
+    "predict",
+    help=help_text,
+    no_args_is_help=True,
+    short_help="Run price predictions for a crypto pair.",
+)
 def predict(
-    pair: BinanceSymbols = typer.Argument(
-        ..., help="Crypto pair (BTCUSDT)", metavar="Pair"
+    pair: str = typer.Argument(
+        ..., help="Crypto pair (BTCUSDT, TATA_STEEL)", metavar="Pair"
     ),
-    interval: ChartIntervals = typer.Argument(
+    interval: str = typer.Argument(
         ..., help="Chart interval (15m, 1h)", metavar="Interval"
     ),
     discord: str = typer.Option(
-        None,
+        ...,
         "-d",
         "--discord",
         help="Discord webhook URL",
         metavar="Discord URL",
-        rich_help_panel=CommandGroups.NOTIFICATION,
-    ),
-    start_time: str = typer.Option(
-        None,
-        "-st",
-        "--start-time",
-        help="Start time for backtesting in 'MM/dd/yyyy HH:mm:ss' format",
-        metavar="Start Time",
-        rich_help_panel=CommandGroups.BACKTEST,
-    ),
-    end_time: str = typer.Option(
-        None,
-        "-et",
-        "--end-time",
-        help="End time for backtesting in 'MM/dd/yyyy HH:mm:ss' format",
-        metavar="End Time",
-        rich_help_panel=CommandGroups.BACKTEST,
-    ),
-    brokerage: float = typer.Option(
-        0.001,
-        "-b",
-        "--brokerage",
-        help="Brokerage to use for backtesting",
-        metavar="Brokerage",
-        rich_help_panel=CommandGroups.BACKTEST,
-    ),
-    capital: float = typer.Option(
-        10000,
-        "-c",
-        "--capital",
-        help="Capital to use for backtesting",
-        metavar="Capital",
-        rich_help_panel=CommandGroups.BACKTEST,
-    ),
-    risk_investment: float = typer.Option(
-        0.02,
-        "-ri",
-        "--risk-investment",
-        help="Risk investment to use for backtesting",
-        metavar="Risk Investment",
-        rich_help_panel=CommandGroups.BACKTEST,
-    ),
-    approval: bool = typer.Option(
-        False,
-        "-a",
-        "--approval",
-        help="User approves each trades while backtesting",
-        metavar="Approval",
-        rich_help_panel=CommandGroups.BACKTEST,
     ),
 ):
     """
@@ -100,38 +59,19 @@ def predict(
        with paper trading simulation.
     """
 
+    # get the trading pair and the trading exchange for that pair
+    trading_pair = registry.generate_pair_enum(pair)
+    if not trading_pair:
+        raise ValueError(
+            f"Unsupported pair: {pair}. Try listing all the pairs and choosing one of them."
+        )
+
     # import and run the function
-    from commands import start_algorithm, backtest_algorithm
+    from commands import start_algorithm
 
-    # check for start time availability
-    if start_time:
-
-        # set the end time as today if not provided
-        if not end_time:
-            end_time = datetime.now().strftime("%m/%d/%Y %H:%M:%S")
-
-        # start backtesting
-        backtest_algorithm(
-            symbol=pair,
-            interval=interval,
-            time_zone=TimeZones.INDIA,
-            start_time=start_time,
-            end_time=end_time,
-            brokerage=brokerage,
-            initial_capital=capital,
-            risk_investment=risk_investment,
-            approval=approval,
-        )
-
-    else:
-        # check if the discord webhook is provided
-        if not discord:
-            raise ValueError("Discord webhook is required for realtime predictions.")
-
-        # start realtime predictions
-        start_algorithm(
-            symbol=pair,
-            interval=interval,
-            time_zone=TimeZones.INDIA,
-            discord_webhook=discord,
-        )
+    # start realtime predictions
+    start_algorithm(
+        symbol=trading_pair,
+        interval=interval,
+        discord_webhook=discord,
+    )

@@ -3,6 +3,7 @@ This module contains the paper trader class which handles the paper trading logi
 """
 
 # 1st party imports
+from enum import Enum
 from datetime import datetime
 from typing import List, Optional, Dict
 
@@ -11,7 +12,6 @@ from pydantic import BaseModel
 
 # local imports
 from .models import Position, TradeType
-from binance_api import BinanceSymbols, ChartIntervals
 
 
 class RiskRewardStats(BaseModel):
@@ -60,6 +60,9 @@ class PaperTradeStats(BaseModel):
     # profit factor
     profit_factor: float
 
+    # trades
+    trades: List[Position]
+
 
 class PaperTrader:
     """
@@ -83,8 +86,8 @@ class PaperTrader:
 
     def open_position(
         self,
-        symbol: BinanceSymbols,
-        interval: ChartIntervals,
+        symbol: Enum,
+        interval: Enum,
         entry_price: float,
         exit_price: float,
         stop_loss: float,
@@ -96,8 +99,8 @@ class PaperTrader:
         Open a new position.
 
         Args:
-            symbol: The trading symbol (e.g., BTCUSDT).
-            interval: The chart interval for candlestick data.
+            symbol: The trading symbol Enum.
+            interval: The interval Enum for candlestick data.
             entry_price: The price at which to enter the trade.
             exit_price: The target price to exit the trade.
             stop_loss: The stop loss price.
@@ -257,6 +260,46 @@ class PaperTrader:
         # reset the current
         self.current = None
 
+    def close_position(self, exit_price: float, timestamp: Optional[datetime] = None):
+        """
+        Close the current position at a specified exit price.
+
+        Args:
+            exit_price: The price at which to close the position.
+            timestamp: The timestamp when the position was closed.
+        """
+
+        # if no open position, return
+        if self.current is None:
+            return
+
+        # get the position
+        pos = self.current
+
+        # increment the age
+        pos.age += 1
+
+        # LONG
+        if pos.trade_type == TradeType.LONG:
+            # calculate PnL
+            pnl = (exit_price - pos.entry_price) * pos.position_size
+            brokerage = (exit_price * pos.position_size) * self.brokerage
+
+        # SHORT
+        else:
+            # calculate PnL
+            pnl = (pos.entry_price - exit_price) * pos.position_size
+            brokerage = (exit_price * pos.position_size) * self.brokerage
+
+        # update the position
+        if pnl <= 0:
+            pos.loss = pnl
+        else:
+            pos.profit = pnl
+
+        # close the position
+        self._close(timestamp, brokerage)
+
     def stats(self) -> PaperTradeStats:
         """
         Calculate and return statistics for all closed trades.
@@ -278,6 +321,7 @@ class PaperTrader:
         total_buy_brokerage = 0
         total_sell_brokerage = 0
         grouped_risk_reawards: Dict[float, RiskRewardStats] = {}
+        trades: List[Position] = []
 
         # iterate over the closed positions
         for pos in self.closed:
@@ -324,6 +368,9 @@ class PaperTrader:
                 curr_rr.trades_won / curr_rr.total_trades * 100, 2
             )
 
+            # add the trade to the list
+            trades.append(pos)
+
         # calculate the total brokerage
         net_profit = profit - loss - total_brokerage
 
@@ -350,4 +397,5 @@ class PaperTrader:
             sell_brokerage=round(total_sell_brokerage, 4),
             total_brokerage=round(total_brokerage, 4),
             grouped_risk_reawards=grouped_risk_reawards,
+            trades=trades,
         )

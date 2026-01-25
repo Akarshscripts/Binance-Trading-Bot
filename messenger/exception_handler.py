@@ -14,14 +14,12 @@ stop_all_exceptions:
 """
 
 # 1st party imports
+import logging
 from functools import wraps
 from typing import Callable, ParamSpec, TypeVar
 
-# local imports
-from .log_config import get_logger
-
 # create a logger
-LOGGER = get_logger("Exception Handler")
+LOGGER = logging.getLogger("Exception Handler")
 
 # create constants
 P = ParamSpec("P")

@@ -8,10 +8,7 @@ from typing import Optional
 from datetime import datetime
 
 # 3rd party import
-from pydantic import BaseModel
-
-# local imports
-from binance_api import BinanceSymbols, ChartIntervals
+from pydantic import BaseModel, field_serializer
 
 
 class TradeType(str, Enum):
@@ -29,8 +26,8 @@ class Position(BaseModel):
     """
 
     # symbol details
-    symbol: BinanceSymbols
-    interval: ChartIntervals
+    symbol: Enum
+    interval: Enum
 
     # trade details
     entry_price: float
@@ -51,3 +48,7 @@ class Position(BaseModel):
     age: int = 0
     trade_end_time: Optional[datetime] = None
     trade_start_time: Optional[datetime] = None
+
+    @field_serializer("symbol")
+    def serialize_symbol(self, symbol: Enum):
+        return symbol.name

@@ -55,6 +55,8 @@ class ChartIntervalInternal(BaseModel):
     def __eq__(self, other: object) -> bool:
         if isinstance(other, int):
             return self.to_seconds() == other
+        elif isinstance(other, str):
+            return str(self) == other.lower()
         return super().__eq__(other)
 
 

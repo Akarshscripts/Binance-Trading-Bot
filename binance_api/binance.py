@@ -18,7 +18,7 @@ import pandas as pd
 from .models import BinanceSymbols, ChartIntervals, TimeZones
 
 
-class BinanceApi:
+class BinanceExchange:
     """
     A class to interact with the Binance API.
     This class provides methods to fetch historical candlestick data for various trading symbols and intervals.
@@ -26,7 +26,7 @@ class BinanceApi:
 
     def __init__(self, timezone: TimeZones = TimeZones.INDIA):
         """
-        Initializes the BinanceApi instance.
+        Initializes the BinanceExchange instance.
 
         Args:
             timezone (TimeZones): The timezone to use for time conversions. Defaults to TimeZones.INDIA.

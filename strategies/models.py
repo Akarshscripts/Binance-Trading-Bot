@@ -99,6 +99,10 @@ class SupertrendStrategyConfig(BaseModel):
         ge=1,
         description="The minimum candle history length for the strategy.",
     )
+    allow_dynamic_risk_reward: bool = Field(
+        True,
+        description="Allow dynamic risk reward ratio based on market conditions.",
+    )
 
     @field_validator("minimum_history", mode="after")
     @classmethod
