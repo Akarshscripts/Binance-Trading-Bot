@@ -113,7 +113,7 @@ def predict_upstox(
         if predictions.action != TradeAction.NEUTRAL:
 
             # prepare msg
-            msg = f"Strategy: **{predictions.action}**.\nTime: **{upstox_df.iloc[-1]["timestamp"].strftime('%Y-%m-%d %H:%M:%S')}**.\nEntry Price: **{predictions.entry_price:.4f}**.\n Stop Loss: **{predictions.stop_loss:.4f}**.\n Take Profit: **{predictions.exit_price:.4f}**."
+            msg = f"Strategy: **{predictions.action}**.\nPair: **{symbol.name}**.\nTime: **{upstox_df.iloc[-1]["timestamp"].strftime('%Y-%m-%d %H:%M:%S')}**.\nEntry Price: **{predictions.entry_price:.4f}**.\n Stop Loss: **{predictions.stop_loss:.4f}**.\n Take Profit: **{predictions.exit_price:.4f}**."
             discord.send_text_message(msg)
             logger.info(msg)
 

@@ -344,9 +344,14 @@ class SupertrendStrategy:
                 stop_loss=curr_stop_loss,
                 risk_reward_ratio=risk_reward_ratio,
                 indicator_details={
-                    "supertrend_data[-1][1]": supertrend_data[-1][1],
-                    "supertrend_data[-2][1]": supertrend_data[-2][1],
-                    "adx_data[-1]": adx_data[-1],
+                    "supertrend_values": {
+                        f"Candle - {k}": v
+                        for k, v in enumerate(
+                            supertrend_data[-10:],
+                            start=max(len(supertrend_data) - 10, 0),
+                        )
+                    },
+                    "adx": adx_data[-1],
                 },
             )
 
