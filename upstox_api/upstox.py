@@ -114,7 +114,6 @@ class UpstoxExchange:
         if isinstance(end_time, str):
             end_time = datetime.strptime(end_time, "%Y-%m-%d")
 
-
         # add utc awareness
         start_time = start_time.replace(tzinfo=pytz.utc)
         end_time = end_time.replace(tzinfo=pytz.utc)

@@ -3,7 +3,9 @@ This module contains the models for the strategies.
 """
 
 # 1st party imports
+import json
 from enum import Enum
+from pathlib import Path
 from typing import Dict, Any, Optional
 
 # 3rd party imports
@@ -109,3 +111,53 @@ class SupertrendStrategyConfig(BaseModel):
     def minimize_history(cls, value: int):
         """minimize the history required."""
         return min(value, 500)
+
+    @classmethod
+    def from_file(cls, file_path: str) -> "SupertrendStrategyConfig":
+        """
+        Load a strategy configuration from a JSON file.
+
+        Raises:
+            FileNotFoundError: If the configuration file does not exist.
+            ValueError: If the file content is not valid JSON or contains invalid keys.
+        """
+
+        # load the file
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Config file not found: {path}")
+
+        # load the json
+        try:
+            with path.open("r", encoding="utf-8") as file:
+                data = json.load(file)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON in config file: {path}") from exc
+
+        # validate the json
+        if not isinstance(data, dict):
+            raise ValueError("Strategy config must be a JSON object.")
+
+        # validate the keys
+        invalid_keys = sorted(set(data) - set(cls.model_fields))
+        if invalid_keys:
+            invalid_key_list = ", ".join(invalid_keys)
+            raise ValueError(f"Invalid config keys: {invalid_key_list}")
+
+        # return the config
+        return cls(**data)
+
+    def dump_to_file(self, file_path: str) -> None:
+        """
+        Dump the strategy configuration to a JSON file.
+        """
+
+        # dump the file
+        path = Path(file_path)
+        if path.parent:
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+        # dump the json
+        payload = self.model_dump(exclude_none=False, exclude_unset=False)
+        with path.open("w", encoding="utf-8") as file:
+            json.dump(payload, file, indent=4)

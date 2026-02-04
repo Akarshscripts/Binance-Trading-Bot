@@ -3,17 +3,14 @@ This module contains the core logic for the backtest command.
 """
 
 # 1st party imports
-from typing import Any
-from pathlib import Path
+from typing import Any, Optional
 
 # local imports
+from .upstox import backtest_upstox
+from .binance import backtest_binance
 from brokers import PaperTrader, PaperTradeStats
 from upstox_api import UpstoxSymbols, UpstoxIntervals
 from binance_api import BinanceSymbols, ChartIntervals
-from strategies import SupertrendStrategy, SupertrendStrategyConfig
-
-from .binance import backtest_binance
-from .upstox import backtest_upstox
 
 
 def _print_stats(stats: PaperTradeStats):
@@ -71,6 +68,7 @@ def execute_backtest(
     initial_capital: float,
     risk_investment: float,
     get_approval: bool,
+    config_file: Optional[str] = None,
 ):
     """
     Backtest predictions for a given symbol and interval.
@@ -84,6 +82,7 @@ def execute_backtest(
         initial_capital: The initial capital to use for backtesting.
         risk_investment: The risk investment percentage to use for backtesting.
         get_approval: Ask user for approval before each trade in backtesting.
+        config_file: The configuration file for the strategy.
     """
 
     # create the paper trader
@@ -97,7 +96,7 @@ def execute_backtest(
     if isinstance(symbol, BinanceSymbols):
 
         # parse the interval
-        interval = ChartIntervals("15m")
+        interval = ChartIntervals(interval)
 
         # backtest binance
         stats = backtest_binance(
@@ -107,6 +106,7 @@ def execute_backtest(
             start_time=start_time,
             end_time=end_time,
             get_approval=get_approval,
+            config_file=config_file,
         )
 
     elif isinstance(symbol, UpstoxSymbols):
@@ -122,6 +122,7 @@ def execute_backtest(
             start_time=start_time,
             end_time=end_time,
             get_approval=get_approval,
+            config_file=config_file,
         )
 
     # print the stats

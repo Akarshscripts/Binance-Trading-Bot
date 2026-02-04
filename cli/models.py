@@ -14,6 +14,7 @@ class CommandGroups(str, Enum):
     REAL_TIME = "Real-time predictions"
     BACKTEST = "Backtesting"
     NOTIFICATION = "Notification"
+    QUANT_RESEARCH = "Quant research"
 
 
 class AvailablePairs(str, Enum):

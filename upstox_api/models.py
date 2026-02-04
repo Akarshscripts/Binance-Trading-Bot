@@ -147,8 +147,12 @@ class UpstoxIntervals(Enum):
 
             # match and return if found
             if fetched_exchange == exchange:
-                start_time = datetime.fromtimestamp(exchange_detail["start_time"] / 1000, tz=pytz.UTC)
-                end_time = datetime.fromtimestamp(exchange_detail["end_time"] / 1000, tz=pytz.UTC)
+                start_time = datetime.fromtimestamp(
+                    exchange_detail["start_time"] / 1000, tz=pytz.UTC
+                )
+                end_time = datetime.fromtimestamp(
+                    exchange_detail["end_time"] / 1000, tz=pytz.UTC
+                )
                 return start_time, end_time
 
         return None

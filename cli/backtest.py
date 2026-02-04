@@ -2,6 +2,9 @@
 This module contains the argument parser for the backtest command.
 """
 
+# 1st party imports
+from typing import Optional
+
 # 3rd party imports
 import typer
 
@@ -66,7 +69,7 @@ def backtest(
         rich_help_panel=CommandGroups.BACKTEST,
     ),
     capital: float = typer.Option(
-        10000,
+        10_000,
         "-c",
         "--capital",
         help="Capital to use for backtesting",
@@ -87,6 +90,14 @@ def backtest(
         "--approval",
         help="User approves each trades while backtesting.",
         metavar="Approval",
+        rich_help_panel=CommandGroups.BACKTEST,
+    ),
+    config_file: Optional[str] = typer.Option(
+        None,
+        "-cf",
+        "--config-file",
+        help="configuration for the strategy.",
+        metavar="Config File",
         rich_help_panel=CommandGroups.BACKTEST,
     ),
 ):
@@ -115,4 +126,5 @@ def backtest(
         initial_capital=capital,
         risk_investment=risk_investment,
         get_approval=approval,
+        config_file=config_file,
     )

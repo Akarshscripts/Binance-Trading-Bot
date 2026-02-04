@@ -4,6 +4,7 @@ This module contains the core logic for the backtest of binance symbols.
 
 # 1st party imports
 import logging
+from typing import Optional
 
 # 3rd party imports
 from tqdm import tqdm
@@ -25,6 +26,7 @@ def backtest_binance(
     start_time: str,
     end_time: str,
     get_approval: bool,
+    config_file: Optional[str] = None,
 ) -> PaperTradeStats:
     """
     Backtest a trading strategy on historical Binance data.
@@ -36,21 +38,32 @@ def backtest_binance(
         start_time: Start time for backtesting in 'MM/dd/yyyy HH:mm:ss' format.
         end_time: End time for backtesting in 'MM/dd/yyyy HH:mm:ss' format.
         get_approval: If True, ask user for approval before each trade.
+        config_file: The configuration file for the strategy.
 
     Returns:
         PaperTradeStats: Statistics from the backtest including profit/loss metrics.
     """
 
+    # load config if available
+    if config_file:
+        strategy_config = SupertrendStrategyConfig.from_file(config_file)
+    else:
+        # create the trading strategy
+        strategy_config = SupertrendStrategyConfig(
+            factor=4,
+            atr_period=14,
+            fractal_period=4,
+            risk_reward_ratio=1.5,
+            allow_dynamic_risk_reward=False,
+        )
+
+        # dump the config
+        strategy_config.dump_to_file("binance_config.json")
+
     # create the trading strategy
-    strategy_config = SupertrendStrategyConfig(
-        factor=3,
-        atr_period=10,
-        fractal_period=7,
-        risk_reward_ratio=2,
-    )
     strategy = SupertrendStrategy(config=strategy_config)
 
-    # create binance instance
+    # parse the start and end time
     start_time = datetime.strptime(start_time, "%m/%d/%Y %H:%M:%S")
     end_time = datetime.strptime(end_time, "%m/%d/%Y %H:%M:%S")
 

@@ -14,6 +14,7 @@ dependencies = [
     "icecream>=2.1.10",
     "idna==3.11",
     "numpy==2.3.5",
+    "optuna>=4.7.0",
     "pandas==2.3.3",
     "passlib==1.7.4",
     "pillow==12.0.0",

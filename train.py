@@ -15,7 +15,6 @@ from neural_net import StockModel
 from dataframe_handler import DataManager
 from indicators import RSI, BollingerBands, VWAP, ATR
 
-
 # --------------------------------------------------
 # GLOBAL SPEED SETTINGS
 # --------------------------------------------------
