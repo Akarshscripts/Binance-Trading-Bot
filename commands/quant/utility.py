@@ -30,6 +30,15 @@ class TrialScoreStore:
         """Initialize an empty thread-safe trial score store."""
         self._lock = Lock()
         self._items: List[Tuple[FrozenTrial, float]] = []
+        self._seen: set[int] = set()
+
+    @staticmethod
+    def _trial_key(trial: FrozenTrial) -> int:
+        if getattr(trial, "number", None) is not None:
+            return int(trial.number)
+        if hasattr(trial, "_trial_id"):
+            return int(trial._trial_id)
+        return id(trial)
 
     def add(self, trial: FrozenTrial, score: float) -> None:
         """
@@ -40,7 +49,11 @@ class TrialScoreStore:
             score: The validation score for the trial.
         """
         with self._lock:
+            key = self._trial_key(trial)
+            if key in self._seen:
+                return
             self._items.append((trial, score))
+            self._seen.add(key)
 
     def snapshot(self, sort: bool = True) -> List[Tuple[FrozenTrial, float]]:
         """
@@ -198,7 +211,7 @@ def create_trial_scoring_callback(
         "rsi_period",
     }
 
-    def callback(_: Study, trial: FrozenTrial) -> None:
+    def callback(study: Study, trial: FrozenTrial) -> None:
         """
         Callback function to evaluate a completed trial on validation data.
 
@@ -207,7 +220,7 @@ def create_trial_scoring_callback(
         a validation score using the test_research function.
 
         Args:
-            _: The Optuna study object (unused).
+            study: The Optuna study object.
             trial: The frozen trial that just completed.
         """
 
@@ -251,7 +264,24 @@ def create_trial_scoring_callback(
         )
         scored_trials.add(trial, score)
 
+        if hasattr(study, "_storage") and hasattr(trial, "_trial_id"):
+            study._storage.set_trial_user_attr(
+                trial._trial_id,
+                "testing_score",
+                score,
+            )
+
     return callback, scored_trials
+
+
+def hydrate_scores_from_study(scored_trials: TrialScoreStore, study: Study) -> None:
+    """Load stored validation scores from Optuna into the score store."""
+
+    for trial in study.trials:
+        score = trial.user_attrs.get("testing_score")
+        if score is None:
+            continue
+        scored_trials.add(trial, float(score))
 
 
 def get_best_trials_from_scores(

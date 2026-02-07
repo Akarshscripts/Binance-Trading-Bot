@@ -20,6 +20,7 @@ from .utility import (
     create_time_windows,
     fetch_symbol_interval_and_data,
     create_trial_scoring_callback,
+    hydrate_scores_from_study,
 )
 
 # create the logger
@@ -122,9 +123,6 @@ def run_quant_research(
                 if trial.params:
                     study.enqueue_trial(trial.params)
 
-        # calculate the remaining trials
-        remaining_trials = n_trials - len(study.trials)
-
         # create a callback to validate and sort best trials
         callback, scored_trials = create_trial_scoring_callback(
             symbol=parsed_symbol,
@@ -132,24 +130,47 @@ def run_quant_research(
             dataframe=val_df,
         )
 
+        # hydrate the scores from storage
+        hydrate_scores_from_study(scored_trials, study)
+        hydrated_scores = scored_trials.snapshot(sort=False)
+        if hydrated_scores:
+            logger.info(
+                "Window %s: hydrated %s scored trials from storage",
+                idx,
+                len(hydrated_scores),
+            )
+
+        # calculate the remaining trials
+        remaining_trials = max(0, n_trials - len(study.trials))
+
         # run the study
-        study.optimize(
-            func=research,
-            n_trials=remaining_trials,
-            n_jobs=n_jobs,
-            show_progress_bar=True,
-            callbacks=[callback],
-        )
-        logger.info("Window %s: study completed with %s trials", idx, len(study.trials))
+        if remaining_trials > 0:
+            study.optimize(
+                func=research,
+                n_trials=remaining_trials,
+                n_jobs=n_jobs,
+                show_progress_bar=True,
+                callbacks=[callback],
+            )
+            logger.info(
+                "Window %s: study completed with %s trials", idx, len(study.trials)
+            )
+        else:
+            logger.info("Window %s: no remaining trials to run", idx)
 
         # update the run config with the params and new boundries
-        final_best_trials = scored_trials.snapshot(sort=True)
+        scored_snapshot = scored_trials.snapshot(sort=True)
+        if not scored_snapshot:
+            logger.warning("Window %s: no scored trials available", idx)
+            continue
+
+        final_best_trials = [trial for trial, _ in scored_snapshot]
         seed_trials = final_best_trials
         logger.info(
             "Window %s: selected %s trials for boundary update. Score of best trial: %s",
             idx,
             len(final_best_trials),
-            final_best_trials[0].value,
+            scored_snapshot[0][1],
         )
 
     # dump the top 5 trial params from the final window
