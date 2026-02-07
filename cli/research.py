@@ -58,6 +58,30 @@ def quant_research(
         metavar="End Time",
         rich_help_panel=CommandGroups.QUANT_RESEARCH,
     ),
+    time_windows: int = typer.Option(
+        5,
+        "-tw",
+        "--time-windows",
+        help="Number of time windows to create for walk forward validation",
+        metavar="Time Windows",
+        rich_help_panel=CommandGroups.QUANT_RESEARCH,
+    ),
+    n_trials: int = typer.Option(
+        500,
+        "-nt",
+        "--n-trials",
+        help="Number of trials to run",
+        metavar="N Trials",
+        rich_help_panel=CommandGroups.QUANT_RESEARCH,
+    ),
+    n_jobs: int = typer.Option(
+        -1,
+        "-nj",
+        "--n-jobs",
+        help="Number of jobs to run in parallel",
+        metavar="N Jobs",
+        rich_help_panel=CommandGroups.QUANT_RESEARCH,
+    ),
 ):
     """
     Find the best strategy configuration for a trading pair.
@@ -90,4 +114,7 @@ def quant_research(
         interval=interval,
         start_time=start_time,
         end_time=end_time,
+        time_windows=time_windows,
+        n_trials=n_trials,
+        n_jobs=n_jobs,
     )
