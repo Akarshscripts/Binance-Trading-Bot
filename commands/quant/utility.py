@@ -264,12 +264,8 @@ def create_trial_scoring_callback(
         )
         scored_trials.add(trial, score)
 
-        if hasattr(study, "_storage") and hasattr(trial, "_trial_id"):
-            study._storage.set_trial_user_attr(
-                trial._trial_id,
-                "testing_score",
-                score,
-            )
+        if getattr(trial, "number", None) is not None:
+            study.set_user_attr(f"testing_score_{trial.number}", score)
 
     return callback, scored_trials
 
@@ -277,8 +273,11 @@ def create_trial_scoring_callback(
 def hydrate_scores_from_study(scored_trials: TrialScoreStore, study: Study) -> None:
     """Load stored validation scores from Optuna into the score store."""
 
+    study_attrs = study.user_attrs
     for trial in study.trials:
         score = trial.user_attrs.get("testing_score")
+        if score is None and getattr(trial, "number", None) is not None:
+            score = study_attrs.get(f"testing_score_{trial.number}")
         if score is None:
             continue
         scored_trials.add(trial, float(score))
