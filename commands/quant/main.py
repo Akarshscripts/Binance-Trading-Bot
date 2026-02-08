@@ -164,7 +164,8 @@ def run_quant_research(
             logger.warning("Window %s: no scored trials available", idx)
             continue
 
-        final_best_trials = [trial for trial, _ in scored_snapshot]
+        top_n_trials = scored_snapshot[: int(len(scored_snapshot) * 0.2)]
+        final_best_trials = [trial for trial, _ in top_n_trials]
         seed_trials = final_best_trials
         logger.info(
             "Window %s: selected %s trials for boundary update. Score of best trial: %s",
