@@ -3,7 +3,7 @@ This module contains the utility functions for the quant research command.
 """
 
 # 1st party imports
-import statistics
+import math
 from enum import Enum
 from threading import Lock
 from datetime import datetime
@@ -66,6 +66,77 @@ class TrialScoreStore:
             if sort:
                 return sorted(list(self._items), key=lambda item: item[1], reverse=True)
             return list(self._items)
+
+
+def calculate_sharpe_ratio(
+    returns: List[float], annual_rf: float = 0.05, annual_days: int = 365
+) -> float:
+    """
+    Calculate the annualized Sharpe ratio for a series of daily returns.
+
+    Args:
+        returns: A list of daily returns (e.g., [0.01, -0.02, 0.015]).
+        annual_rf: The annual risk-free rate (default 5%).
+
+    Returns:
+        The annualized Sharpe ratio. Returns 0 if standard deviation is zero.
+    """
+
+    if len(returns) < 2:
+        return 0
+
+    # calculate daily risk-free rate
+    daily_rf = (1 + annual_rf) ** (1 / annual_days) - 1
+    excess = [r - daily_rf for r in returns]
+
+    # calculate mean and standard deviation
+    mean_excess = sum(excess) / len(excess)
+    std_excess = (
+        sum((r - mean_excess) ** 2 for r in excess) / (len(excess) - 1)
+    ) ** 0.5
+
+    # if standard deviation is zero, return 0
+    if std_excess == 0:
+        return 0
+
+    # calculate sharpe ratio
+    sharpe = mean_excess / std_excess
+
+    # annualize it (convention is to report Sharpe as an annual figure)
+    return sharpe * math.sqrt(annual_days)
+
+
+def calculate_maximum_drawdown(returns: List[float]) -> float:
+    """
+    Calculate the maximum drawdown from a series of returns.
+
+    Args:
+        returns: A list of returns (e.g., [0.01, -0.02, 0.015]).
+
+    Returns:
+        The maximum drawdown as a positive float (e.g., 0.15 for 15% drawdown).
+        Returns 0 if no drawdown occurred.
+    """
+    if len(returns) < 1:
+        return 0.0
+
+    # Convert returns to cumulative wealth
+    cumulative = [1.0]
+    for r in returns:
+        cumulative.append(cumulative[-1] * (1 + r))
+
+    # Track running maximum and maximum drawdown
+    running_max = cumulative[0]
+    max_drawdown = 0.0
+
+    for value in cumulative:
+        if value > running_max:
+            running_max = value
+        drawdown = (running_max - value) / running_max
+        if drawdown > max_drawdown:
+            max_drawdown = drawdown
+
+    return max_drawdown
 
 
 def test_research(
@@ -160,26 +231,101 @@ def test_research(
     # calculate sharpe ratio using per-trade returns
     if initial_investment <= 0:
         return 0.0
+    trading_stats = paper_trader.stats()
 
-    # calculate returns/trade
-    returns = []
+    # calculate equity curve
+    equity = [initial_investment]
     for trade in paper_trader.closed:
         pnl = trade.profit - trade.loss - trade.total_brokerage
-        returns.append(pnl / initial_investment)
+        equity.append(equity[-1] + pnl)
+
+    # calculate returns
+    returns = []
+    for i in range(1, len(equity)):
+        r = (equity[i] - equity[i - 1]) / equity[i - 1]
+        returns.append(r)
 
     # if no returns, return 0
     if not returns:
         return 0.0
 
-    # calculate average and standard deviation
-    avg_return = statistics.mean(returns)
-    std_return = statistics.pstdev(returns)
-    if std_return == 0:
-        return 0.0
+    # calculate cagr (compound annual growth rate)
+    years = (
+        dataframe.iloc[-1]["timestamp"] - dataframe.iloc[0]["timestamp"]
+    ).days / 365
+    cagr = (paper_trader.capital / initial_investment) ** (1 / max(years, 0.25)) - 1
 
-    # calculate sharpe ratio
-    sharpe_ratio = avg_return / std_return
-    return sharpe_ratio
+    # if cagr is less than 0, scale the penalty so worse losses rank lower
+    if cagr <= 0:
+        return cagr * 1e9
+
+    # calculate max drawdown
+    max_drawdown = calculate_maximum_drawdown(returns)
+
+    # calculate profit factor
+    profit_factor = trading_stats.profit / max(trading_stats.loss, 1e-8)
+
+    # calculate win expectancy
+    win_expectancy = (trading_stats.avg_profit * trading_stats.success_rate) - (
+        trading_stats.avg_loss * (1 - trading_stats.success_rate)
+    )
+    win_expectancy = win_expectancy / initial_investment
+
+    # return the score
+    return (
+        (cagr / max(max_drawdown, 1e-8)) * 0.5
+        + (profit_factor - 1) * 0.3
+        + win_expectancy * 0.2
+    )
+
+
+def score_trial_params_on_window(
+    trial: FrozenTrial,
+    symbol: Enum,
+    interval: Any,
+    dataframe: pd.DataFrame,
+) -> float:
+    """
+    Score a trial's params against an arbitrary dataframe window.
+
+    Args:
+        trial: The frozen trial whose params to evaluate.
+        symbol: The trading symbol.
+        interval: The chart interval.
+        dataframe: The window to score on.
+
+    Returns:
+        float: The score produced by test_research for these params.
+    """
+
+    params = trial.params or {}
+    strategy_config = SupertrendStrategyConfig(
+        factor=params["factor"],
+        atr_period=params["atr_period"],
+        fractal_period=params["fractal_period"],
+        adx_period=params.get("adx_period", 14),
+        adx_smoothing=params.get("adx_smoothing", 14),
+        adx_threshold=params.get("adx_threshold", 25),
+        ema_1_period=params.get("ema_1_period", 9),
+        ema_2_period=params.get("ema_2_period", 21),
+        ema_3_period=params.get("ema_3_period", 50),
+        bbands_period=params.get("bbands_period", 20),
+        rsi_period=params.get("rsi_period", 14),
+        risk_reward_ratio=2,
+    )
+    strategy = SupertrendStrategy(config=strategy_config)
+    paper_trader = PaperTrader(
+        brokerage=0.001,
+        capital=10_000,
+        risk_investment=0.02,
+    )
+    return test_research(
+        symbol=symbol,
+        interval=interval,
+        dataframe=dataframe,
+        strategy=strategy,
+        paper_trader=paper_trader,
+    )
 
 
 def create_trial_scoring_callback(
@@ -333,17 +479,12 @@ def create_research(
 
     # if params_config is None, initialize it as an empty dictionary
     default_params_config = {
-        "factor": {"min": 1, "max": 5},
-        "atr_period": {"min": 10, "max": 30},
-        "fractal_period": {"min": 2, "max": 15},
-        "adx_period": {"min": 10, "max": 30},
-        "adx_smoothing": {"min": 10, "max": 30},
-        "adx_threshold": {"min": 10, "max": 30},
-        "ema_1_period": {"min": 8, "max": 30},
-        "ema_2_period": {"min": 10, "max": 50},
-        "ema_3_period": {"min": 20, "max": 100},
-        "bbands_period": {"min": 5, "max": 40},
-        "rsi_period": {"min": 5, "max": 20},
+        "factor": {"min": 1, "max": 30},
+        "atr_period": {"min": 10, "max": 50},
+        "fractal_period": {"min": 2, "max": 30},
+        "adx_period": {"min": 10, "max": 80},
+        "adx_smoothing": {"min": 10, "max": 80},
+        "adx_threshold": {"min": 10, "max": 40},
     }
 
     # if params_config is None, use default_params_config
@@ -415,37 +556,6 @@ def create_research(
             params_config["adx_threshold"]["max"],
         )
 
-        # ema params
-        ema_1_period = trial.suggest_int(
-            "ema_1_period",
-            params_config["ema_1_period"]["min"],
-            params_config["ema_1_period"]["max"],
-        )
-        ema_2_period = trial.suggest_int(
-            "ema_2_period",
-            params_config["ema_2_period"]["min"],
-            params_config["ema_2_period"]["max"],
-        )
-        ema_3_period = trial.suggest_int(
-            "ema_3_period",
-            params_config["ema_3_period"]["min"],
-            params_config["ema_3_period"]["max"],
-        )
-
-        # bollinger bands params
-        bbands_period = trial.suggest_int(
-            "bbands_period",
-            params_config["bbands_period"]["min"],
-            params_config["bbands_period"]["max"],
-        )
-
-        # rsi params
-        rsi_period = trial.suggest_int(
-            "rsi_period",
-            params_config["rsi_period"]["min"],
-            params_config["rsi_period"]["max"],
-        )
-
         # create the trading strategy
         strategy_config = SupertrendStrategyConfig(
             factor=factor,
@@ -454,12 +564,8 @@ def create_research(
             adx_period=adx_period,
             adx_smoothing=adx_smoothing,
             adx_threshold=adx_threshold,
-            ema_1_period=ema_1_period,
-            ema_2_period=ema_2_period,
-            ema_3_period=ema_3_period,
-            bbands_period=bbands_period,
-            rsi_period=rsi_period,
             risk_reward_ratio=risk_reward_ratio,
+            allow_dynamic_risk_reward=False,
         )
         strategy = SupertrendStrategy(config=strategy_config)
 
@@ -542,7 +648,8 @@ def create_time_windows(
     dataframe: pd.DataFrame, time_windows: int, train_ratio: float = 0.8
 ) -> List[Tuple[pd.DataFrame, pd.DataFrame]]:
     """
-    Create time windows for walk forward validation.
+    Creates tuples of train and test dataframes from the given dataframe.
+    Each tuple contains (train_df, test_df) for each time window.
 
     Args:
         dataframe: DataFrame containing historical price data.
@@ -575,6 +682,41 @@ def create_time_windows(
         train_df = dataframe.iloc[window_start:train_end].reset_index(drop=True)
         test_df = dataframe.iloc[train_end:test_end].reset_index(drop=True)
         splited_df.append((train_df, test_df))
+
+    # return the splits
+    return splited_df
+
+
+def split_dataframe_into_windows(
+    dataframe: pd.DataFrame, time_windows: int
+) -> List[pd.DataFrame]:
+    """
+    Creates several windows from the given dataframe.
+    This function is used to split a dataframe into multiple windows.
+
+    Args:
+        dataframe: DataFrame containing historical price data.
+        time_windows: Number of time windows to create.
+
+    Returns:
+        List[pd.DataFrame]: List of windowed dataframes.
+    """
+
+    # calculate the split size
+    n = len(dataframe)
+    window_size = n // time_windows
+
+    # create the test and train splits
+    splited_df = []
+    for idx in range(time_windows):
+
+        # calculate the window start and end
+        window_start = idx * window_size
+        window_end = window_start + window_size
+
+        # create the window dataframe
+        window_df = dataframe.iloc[window_start:window_end].reset_index(drop=True)
+        splited_df.append(window_df)
 
     # return the splits
     return splited_df

@@ -36,6 +36,7 @@ class Position(BaseModel):
     trade_type: TradeType
     position_size: int
     risk_reward_ratio: float
+    capital_used: float
 
     # P/L details
     profit: float = 0

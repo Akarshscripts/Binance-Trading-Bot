@@ -169,6 +169,7 @@ class PaperTrader:
             open_brokerage=open_brokerage,
             position_size=position_size,
             risk_reward_ratio=risk_reward_ratio,
+            capital_used=required_capital,
         )
 
         # return true
