@@ -13,7 +13,7 @@ from datetime import datetime, time
 # local imports
 from brokers import PaperTrader, TradeType, PaperTradeStats
 from upstox_api import UpstoxSymbols, UpstoxExchange, UpstoxIntervals
-from strategies import SupertrendStrategy, SupertrendStrategyConfig, TradeAction
+from strategies import Strategy, SupertrendStrategy, SupertrendStrategyConfig, TradeAction
 
 # get the logger
 logger = logging.getLogger("backtest")
@@ -60,7 +60,7 @@ def backtest_upstox(
         # dump the config
         strategy_config.dump_to_file("upstox_config.json")
 
-    strategy = SupertrendStrategy(config=strategy_config)
+    strategy: Strategy = SupertrendStrategy(config=strategy_config)
 
     # create upstox instance
     start_time = datetime.strptime(start_time, "%m/%d/%Y %H:%M:%S")
@@ -77,7 +77,6 @@ def backtest_upstox(
         start_time=start_time,
         end_time=end_time,
     )
-    upstox_df.to_csv("upstox.csv", index=False)
     logger.info(f"Fetched {len(upstox_df)} candles for backtesting")
 
     # market open and close times

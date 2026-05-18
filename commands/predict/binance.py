@@ -1,22 +1,23 @@
 """
-This module contains the core logic for the finding signals of binance symbols.
+This module contains the core logic for finding signals on Binance symbols via WebSocket.
 """
 
 # 1st party imports
-import pytz
 import json
-import time
 import logging
+import time
+import pytz
+from datetime import datetime
 from pathlib import Path
 
 # 3rd party imports
-from pandas import DataFrame
-from datetime import datetime
+import pandas as pd
+import websocket
 
 # local imports
 from messenger import Messenger
 from binance_api import BinanceSymbols, BinanceExchange, ChartIntervals
-from strategies import SupertrendStrategy, SupertrendStrategyConfig, TradeAction
+from strategies import Strategy, SupertrendStrategy, SupertrendStrategyConfig, TradeAction
 
 # get the logger
 logger = logging.getLogger("predict.binance")
@@ -27,17 +28,15 @@ def predict_binance(
     interval: ChartIntervals,
     discord_webhook: str,
     time_zone: str = "Asia/Kolkata",
-    lag: int = 30,
 ):
     """
-    Find signals for a trading strategy on historical binance data.
+    Stream live Binance candles via WebSocket and post trade signals to Discord.
 
     Args:
-        symbol: The binance trading symbol to backtest (e.g., BTCUSDT).
+        symbol: The Binance trading symbol (e.g., BTCUSDT).
         interval: The chart interval for candlestick data.
-        discord_webhook: The Discord webhook URL for sending predictions.
-        time_zone: The timezone for time conversions.
-        lag: Seconds to wait after interval ends before fetching (default: 30).
+        discord_webhook: Discord webhook URL for sending trade signals.
+        time_zone: IANA timezone name for display timestamps.
     """
 
     # create config
@@ -51,75 +50,104 @@ def predict_binance(
     # instances
     binance_api = BinanceExchange()
     discord = Messenger(webhook_url=discord_webhook)
-    strategy = SupertrendStrategy(config=strategy_config)
+    strategy: Strategy = SupertrendStrategy(config=strategy_config)
+    local_tz = pytz.timezone(time_zone)
 
-    # time variables
-    curr_time = None
-    next_fetch_at = interval.get_next_fetch_time(lag=lag)
-    local_next_fetch_at = datetime.fromtimestamp(
-        next_fetch_at, tz=pytz.timezone(time_zone)
-    )
-
-    # create a json file to dump trades
+    # create a jsonl file to log trades
     trades_jsonl = Path("trades.jsonl")
     trades_jsonl.touch()
 
-    # send the startup message
-    startup_msg = f"Starting predictions for {symbol.value} on {interval.value} interval. Next fetch at: {local_next_fetch_at.strftime('%Y-%m-%d %H:%M:%S')}."
+    # seed historical data via HTTP before opening WebSocket
+    logger.info("Seeding historical data for %s %s...", symbol.value, interval.value)
+    df = binance_api.get_symbol_info(symbol=symbol, interval=interval)
+    df = df.drop(df.index[-1])  # drop the live (incomplete) candle
+    logger.info("Seeded %d candles.", len(df))
+
+    # send startup message
+    startup_msg = f"Starting WebSocket predictions for {symbol.value} on {interval.value} interval."
     logger.info(startup_msg)
     discord.send_text_message(startup_msg)
 
-    # main loop
-    while True:
+    # build WebSocket URL: wss://stream.binance.com:9443/ws/<symbol>@kline_<interval>
+    interval_str = f"{interval.value.time_value}{interval.value.time_unit}"
+    ws_url = f"wss://stream.binance.com:9443/ws/{symbol.value.lower()}@kline_{interval_str}"
 
-        # check if it is time to fetch
-        curr_time = time.time()  # UTC timestamp
-        sleep_for = next_fetch_at - curr_time
-        if sleep_for > 0:
-            time.sleep(sleep_for)
+    def on_open(ws):
+        logger.info("Connected to Binance WebSocket stream: %s", ws_url)
 
-        # fetch the data
+    def on_message(ws, message):
+        nonlocal df
+
+        data = json.loads(message)
+        kline = data["k"]
+
+        # only process closed candles
+        if not kline["x"]:
+            return
+
+        # build new row from WebSocket kline payload
+        ts = datetime.fromtimestamp(kline["t"] / 1000, tz=pytz.utc).astimezone(local_tz)
+        new_row = pd.DataFrame([{
+            "timestamp": ts,
+            "open": float(kline["o"]),
+            "high": float(kline["h"]),
+            "low": float(kline["l"]),
+            "close": float(kline["c"]),
+            "volume": float(kline["v"]),
+        }])
+
+        # append to rolling window and cap at 600 candles
+        df = pd.concat([df, new_row], ignore_index=True).tail(600)
+
         logger.info(
-            f"Fetching data for {symbol.value} on {interval.value} interval. time: {datetime.fromtimestamp(curr_time, tz=pytz.timezone(time_zone)).strftime('%Y-%m-%d %H:%M:%S')}"
-        )
-        binance_df = binance_api.get_symbol_info(
-            symbol=symbol,
-            interval=interval,
+            "Closed candle: %s | close=%.4f",
+            ts.strftime("%Y-%m-%d %H:%M:%S"),
+            float(kline["c"]),
         )
 
-        # calculate the next fetch time
-        next_fetch_at = interval.get_next_fetch_time(lag=lag)
-        local_next_fetch_at = datetime.fromtimestamp(
-            next_fetch_at, tz=pytz.timezone(time_zone)
-        )
-
-        # remove the last row as it is not completed yet
-        binance_df: DataFrame = binance_df.drop(binance_df.index[-1])
-
-        # make predictions
+        # run strategy
         predictions = strategy.process_candles(
-            open_prices=binance_df["open"],
-            high_prices=binance_df["high"],
-            low_prices=binance_df["low"],
-            close_prices=binance_df["close"],
-            volumes=binance_df["volume"],
-        )
-        logger.info(
-            f"Latest candle: {binance_df.iloc[-1]['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}. Latest Candle Close: {binance_df.iloc[-1]['close']:.4f}"
+            open_prices=df["open"],
+            high_prices=df["high"],
+            low_prices=df["low"],
+            close_prices=df["close"],
+            volumes=df["volume"],
         )
 
-        # if the strategy is not neutral, send the message
+        # send Discord signal on non-neutral action
         if predictions.action != TradeAction.NEUTRAL:
-
-            # prepare msg
-            msg = f"Strategy: **{predictions.action.value}**. Pair: **{symbol.value}**.\nTime: **{binance_df.iloc[-1]["timestamp"].strftime('%Y-%m-%d %H:%M:%S')}**.\nEntry Price: **{predictions.entry_price:.4f}**.\n Stop Loss: **{predictions.stop_loss:.4f}**.\n Take Profit: **{predictions.exit_price:.4f}**."
+            msg = (
+                f"Strategy: **{predictions.action.value}**. Pair: **{symbol.value}**.\n"
+                f"Time: **{ts.strftime('%Y-%m-%d %H:%M:%S')}**.\n"
+                f"Entry Price: **{predictions.entry_price:.4f}**.\n"
+                f"Stop Loss: **{predictions.stop_loss:.4f}**.\n"
+                f"Take Profit: **{predictions.exit_price:.4f}**."
+            )
             discord.send_text_message(msg)
             logger.info(msg)
 
-            # dump the trade to jsonl
             with trades_jsonl.open("a") as f:
                 f.write(json.dumps(predictions.model_dump(mode="json")) + "\n")
 
-        # print cycle complete message
-        cycle_complete_msg = "-" * 20 + " Cycle Complete " + "-" * 20
-        logger.info(cycle_complete_msg)
+        logger.info("-" * 20 + " Cycle Complete " + "-" * 20)
+
+    def on_error(ws, error):
+        logger.error("WebSocket error: %s", error)
+
+    def on_close(ws, close_status_code, close_msg):
+        logger.warning(
+            "WebSocket closed (code=%s): %s", close_status_code, close_msg
+        )
+
+    # connect with automatic reconnect on disconnect
+    while True:
+        ws = websocket.WebSocketApp(
+            ws_url,
+            on_open=on_open,
+            on_message=on_message,
+            on_error=on_error,
+            on_close=on_close,
+        )
+        ws.run_forever()
+        logger.warning("WebSocket disconnected. Reconnecting in 5 seconds...")
+        time.sleep(5)

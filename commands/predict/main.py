@@ -43,7 +43,6 @@ def start_algorithm(
             symbol=symbol,
             interval=interval,
             discord_webhook=discord_webhook,
-            lag=lag,
         )
 
     elif isinstance(symbol, UpstoxSymbols):

@@ -11,6 +11,7 @@ from collections import deque
 import numpy as np
 
 # local imports
+from strategies.base import Strategy
 from strategies.models import PredictionOutput, TradeAction, SupertrendStrategyConfig
 from indicators import (
     FractalsIndicator,
@@ -22,7 +23,7 @@ from indicators import (
 )
 
 
-class SupertrendStrategy:
+class SupertrendStrategy(Strategy):
     """
     Supertrend strategy that combines Supertrend indicator with fractal-based stop losses.
     """

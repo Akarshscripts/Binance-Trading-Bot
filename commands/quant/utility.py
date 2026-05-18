@@ -18,7 +18,7 @@ from optuna.trial import FrozenTrial, TrialState
 # local imports
 from brokers import PaperTrader, TradeType
 from strategies.models import TradeAction
-from strategies import SupertrendStrategy, SupertrendStrategyConfig
+from strategies import Strategy, SupertrendStrategy, SupertrendStrategyConfig
 from upstox_api import UpstoxSymbols, UpstoxIntervals, UpstoxExchange
 from binance_api import ChartIntervals, BinanceSymbols, BinanceExchange, TimeZones
 
@@ -313,7 +313,7 @@ def score_trial_params_on_window(
         rsi_period=params.get("rsi_period", 14),
         risk_reward_ratio=2,
     )
-    strategy = SupertrendStrategy(config=strategy_config)
+    strategy: Strategy = SupertrendStrategy(config=strategy_config)
     paper_trader = PaperTrader(
         brokerage=0.001,
         capital=10_000,
@@ -393,7 +393,7 @@ def create_trial_scoring_callback(
 
         # create the strategy and paper trader
         strategy_config = SupertrendStrategyConfig(**config_values)
-        strategy = SupertrendStrategy(config=strategy_config)
+        strategy: Strategy = SupertrendStrategy(config=strategy_config)
         paper_trader = PaperTrader(
             brokerage=0.001,
             capital=10_000,
@@ -567,7 +567,7 @@ def create_research(
             risk_reward_ratio=risk_reward_ratio,
             allow_dynamic_risk_reward=False,
         )
-        strategy = SupertrendStrategy(config=strategy_config)
+        strategy: Strategy = SupertrendStrategy(config=strategy_config)
 
         # run backtesting
         success_rate = test_research(

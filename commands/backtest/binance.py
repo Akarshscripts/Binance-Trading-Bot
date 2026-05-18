@@ -12,7 +12,7 @@ from datetime import datetime
 
 # local imports
 from brokers import PaperTrader, TradeType, PaperTradeStats
-from strategies import SupertrendStrategy, TradeAction, SupertrendStrategyConfig
+from strategies import Strategy, SupertrendStrategy, TradeAction, SupertrendStrategyConfig
 from binance_api import ChartIntervals, BinanceSymbols, BinanceExchange, TimeZones
 
 # get the logger
@@ -61,7 +61,7 @@ def backtest_binance(
         strategy_config.dump_to_file("binance_config.json")
 
     # create the trading strategy
-    strategy = SupertrendStrategy(config=strategy_config)
+    strategy: Strategy = SupertrendStrategy(config=strategy_config)
 
     # parse the start and end time
     start_time = datetime.strptime(start_time, "%m/%d/%Y %H:%M:%S")

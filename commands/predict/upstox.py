@@ -8,15 +8,15 @@ import json
 import time
 import logging
 from pathlib import Path
+from datetime import datetime, timedelta
 
 # 3rd party imports
 from pandas import DataFrame
-from datetime import datetime
 
 # local imports
 from messenger import Messenger
 from upstox_api import UpstoxSymbols, UpstoxExchange, UpstoxIntervals
-from strategies import SupertrendStrategy, SupertrendStrategyConfig, TradeAction
+from strategies import Strategy, SupertrendStrategy, SupertrendStrategyConfig, TradeAction
 
 # get the logger
 logger = logging.getLogger("predict.upstox")
@@ -51,7 +51,7 @@ def predict_upstox(
     # instances
     upstox_api = UpstoxExchange()
     discord = Messenger(webhook_url=discord_webhook)
-    strategy = SupertrendStrategy(config=strategy_config)
+    strategy: Strategy = SupertrendStrategy(config=strategy_config)
 
     # time variables
     curr_time = None
@@ -85,7 +85,7 @@ def predict_upstox(
         upstox_df = upstox_api.get_symbol_info(
             symbol=symbol,
             interval=interval,
-            start_time=datetime.now(),
+            start_time=datetime.now() - timedelta(days=60),
         )
 
         # calculate the next fetch time
@@ -113,7 +113,7 @@ def predict_upstox(
         if predictions.action != TradeAction.NEUTRAL:
 
             # prepare msg
-            msg = f"Strategy: **{predictions.action}**.\nPair: **{symbol.name}**.\nTime: **{upstox_df.iloc[-1]["timestamp"].strftime('%Y-%m-%d %H:%M:%S')}**.\nEntry Price: **{predictions.entry_price:.4f}**.\n Stop Loss: **{predictions.stop_loss:.4f}**.\n Take Profit: **{predictions.exit_price:.4f}**."
+            msg = f"Strategy: **{predictions.action.value}**.\nPair: **{symbol.value}**.\nTime: **{upstox_df.iloc[-1]['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}**.\nEntry Price: **{predictions.entry_price:.4f}**.\n Stop Loss: **{predictions.stop_loss:.4f}**.\n Take Profit: **{predictions.exit_price:.4f}**."
             discord.send_text_message(msg)
             logger.info(msg)
 
